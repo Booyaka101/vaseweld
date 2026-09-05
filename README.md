@@ -193,7 +193,10 @@ only and will tell you so rather than guess.
 
 ## See it without a printer
 
-`vaseweld preview` writes one self-contained HTML file. Open it in any browser and drag the slider:
+**[Open the demo](https://booyaka101.github.io/vaseweld/)** and drag the slider. Three welds of the same pair of slices, drawn from
+their real G-code, nothing to install.
+
+`vaseweld preview` writes the same thing for your own file, one self-contained HTML file. Open it in any browser and drag the slider:
 every bead is drawn at the width the G-code actually asks for, coloured by which slice it came from.
 
 ```
@@ -209,7 +212,7 @@ the three sections are visible as they stack:
 
 ![The finished weld from the front: blue base, orange vase body, blue lid](docs/preview-stack.png)
 
-To rebuild all of it from a fresh clone, with nothing installed:
+To rebuild that demo from a fresh clone, with nothing installed:
 
 ```
 python sim/demo.py

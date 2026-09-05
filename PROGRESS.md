@@ -1,6 +1,7 @@
 # PROGRESS
 
-vaseweld 1.2.0. Feature complete and verified locally. Not published (that is the owner's step).
+vaseweld 1.2.0. Live at https://github.com/Booyaka101/vaseweld with the demo published at
+https://booyaka101.github.io/vaseweld/. Not on PyPI and not tagged yet.
 
 A stranger can see it work without installing anything: `vaseweld preview` writes a self-contained
 HTML page of the real toolpath, `python sim/demo.py` builds three of them plus an index from a fresh
@@ -80,8 +81,8 @@ green against PrusaSlicer alone.
   `tools/render_preview.py` from the actual output file. The brief asked for a photo; substituting a
   render is the honest option, and it is captioned as a render. **This is the one thing to replace
   before posting anywhere**: print the hybrid, photograph it, drop it in as the lead image.
-- **Not published.** 5 commits on local `main` (499ffd3..d668615), no remote, no PyPI
-  upload and no release tag.
+- **Not on PyPI, not tagged.** The repo is public and all three workflows are green on `main`, but
+  `twine upload` and `git tag v1.2.0` have not been run.
 - **`pipx run vaseweld` is untested against a real release**, because it resolves from PyPI. The
   local equivalent (clean venv + wheel + console script) passes. Note the uv/pipx trap: the console
   script is named `vaseweld`, the same as the package, so `uvx vaseweld` and `pipx run vaseweld`
@@ -89,7 +90,8 @@ green against PrusaSlicer alone.
 
 ## Shipping steps for the owner
 
-1. Push local `main` to a public `Booyaka101/vaseweld`.
+1. ~~Push local `main` to a public `Booyaka101/vaseweld`.~~ Done, CI green across
+   Linux/macOS/Windows on Python 3.10 to 3.13.
 2. Print the hybrid, photograph it, replace `docs/weld-preview.png` as the lead image (keep the
    render lower down, it explains the mechanism).
 3. `python -m build && python -m twine upload dist/*` for PyPI.
@@ -97,8 +99,7 @@ green against PrusaSlicer alone.
    `vaseweld.exe`, checks the tag matches `__version__`, and attaches the exe, wheel, sdist and
    standalone `vaseweld.py` to the GitHub release. Cut the tag only after CI is green on that exact
    commit.
-5. Enable GitHub Pages (Settings > Pages > source: GitHub Actions). `pages.yml` then publishes the
-   demo on every push to `main`, and the README can link it.
+5. ~~Enable GitHub Pages.~~ Done, the demo is live at https://booyaka101.github.io/vaseweld/ and rebuilds on every push.
 6. Best first distribution step: comment on
    [PrusaSlicer #3204](https://github.com/prusa3d/PrusaSlicer/issues/3204). Six years of `+1`, the
    bot has just labelled it legacy and threatened to auto-close it, and the thread's own regulars
