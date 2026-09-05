@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.2.2
+
+- The demo printed a cylinder. Every fixture in this repository is a plain 20 mm tube, which is the
+  right shape for a test (constant radius, so a bug in the weld has nowhere to hide) and the wrong
+  one for showing someone a tool called vaseweld: the top view was a disc and the front view a
+  rectangle, whichever section came from the vase slice. `examples/vase_40mm.stl` is a real vase
+  profile now, with a belly, a neck and a flared lip, and the demo and the README lead image are
+  built from slices of it. The test fixtures are untouched.
+- `tools/make_cylinder_stl.py` is now `tools/make_stl.py --shape {cylinder,vase}`, one surface of
+  revolution generator instead of two. The cylinders it writes are the same solid as the committed
+  ones, triangle for triangle.
+
 ## 1.2.1
 
 - The preview was broken on phones and on any HiDPI screen. It had no viewport meta tag, so phones

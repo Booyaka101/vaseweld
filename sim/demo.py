@@ -1,6 +1,6 @@
 """Run the whole thing end to end and leave a folder you can show someone.
 
-Uses only the committed fixtures and the standard library, so it works on a fresh
+Uses only the committed example slices and the standard library, so it works on a fresh
 clone with nothing installed:
 
     python sim/demo.py
@@ -24,25 +24,25 @@ from vaseweld.preview import write as write_preview  # noqa: E402
 from vaseweld.validate import check  # noqa: E402
 from vaseweld.weld import weld  # noqa: E402
 
-FIXTURES = ROOT / "tests" / "fixtures"
+EXAMPLES = ROOT / "examples"
 
 CASES = [
     (
         "vase-above",
-        "a solid base with the vase starting at Z=12.4",
-        [12.4],
+        "a solid base with the vase starting at Z=6.2, just under the belly",
+        [6.2],
         "normal",
     ),
     (
         "vase-below",
-        "a vase body with a solid lid from Z=25",
-        [25.0],
+        "a vase body with a solid lid from Z=30.2, so the neck and lip are solid",
+        [30.2],
         "vase",
     ),
     (
         "base-vase-lid",
-        "a solid base, a vase body from Z=12.4, and a solid lid from Z=30",
-        [12.4, 30.0],
+        "a solid base, a spiral body from Z=6.2, and a solid neck and lip from Z=30.2",
+        [6.2, 30.2],
         "normal",
     ),
 ]
@@ -54,9 +54,9 @@ def main() -> None:
     args = ap.parse_args()
     args.out.mkdir(parents=True, exist_ok=True)
 
-    print(f"vaseweld {__version__}: welding the committed fixtures\n")
-    normal = parse_file(FIXTURES / "prusaslicer_normal_40mm.gcode")
-    vase = parse_file(FIXTURES / "prusaslicer_vase_40mm.gcode")
+    print(f"vaseweld {__version__}: welding the two slices in examples/\n")
+    normal = parse_file(EXAMPLES / "vase_normal_40mm.gcode")
+    vase = parse_file(EXAMPLES / "vase_spiral_40mm.gcode")
     print(
         f"  normal slice: {len(normal.layers)} layers, Z {normal.layers[0].z} to {normal.layers[-1].z}"
     )

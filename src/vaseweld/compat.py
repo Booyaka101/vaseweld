@@ -156,19 +156,19 @@ def check_compatible(a: GcodeFile, b: GcodeFile) -> None:
                 f"{SINGLE_OBJECT_MSG}"
             )
 
-    for field in COMPARED_FIELDS:
-        left, right = a.config.get(field), b.config.get(field)
+    for key in COMPARED_FIELDS:
+        left, right = a.config.get(key), b.config.get(key)
         if left is None and right is None:
             continue
         if left is None or right is None:
             present, missing = (a, b) if right is None else (b, a)
             raise CompatError(
-                f"config mismatch on '{field}': {_label(present)} sets it, "
+                f"config mismatch on '{key}': {_label(present)} sets it, "
                 f"{_label(missing)} does not. Re-slice both files from the same project."
             )
-        if normalise(field, left) != normalise(field, right):
+        if normalise(key, left) != normalise(key, right):
             raise CompatError(
-                f"config mismatch on '{field}': "
+                f"config mismatch on '{key}': "
                 f"{_label(a)} = {left!r}, {_label(b)} = {right!r}. "
                 "Both files must come from the same plate and printer profile."
             )

@@ -4,10 +4,11 @@ Spiral vase mode is all-or-nothing in every slicer. vaseweld welds two G-code fi
 the same plate at a Z height you pick, so the vase can start above a solid base, or stop below a
 solid lid.
 
-![Toolpath around a weld at Z=12.4: flat layers below, a continuous spiral above](docs/weld-preview.png)
+![A vase drawn from the welded G-code: blue solid base, orange spiral body, blue solid neck](docs/weld-preview.png)
 
-*A real render of the welded output below. Blue lines are ordinary layers from the normal slice,
-orange lines are the spiral from the vase slice, and the change happens exactly at Z=12.4.*
+*Drawn bead by bead from the welded output below, not a photo and not a mock-up. Blue is the normal
+slice, orange is the spiral vase section, and the two seams are at Z=6.2 and Z=30.2. The model is
+`examples/vase_40mm.stl`.*
 
 **The output always uses relative extrusion (`M83`).** If your slice uses absolute E (`M82`),
 vaseweld converts it. This is not optional: the flow ramp across the transition layer scales
@@ -60,14 +61,14 @@ Slice the same plate twice in PrusaSlicer, OrcaSlicer or BambuStudio. Once with 
 once with it on. Do not move, rescale or reorient the object in between. Save both files, then:
 
 ```
-$ vaseweld weld --normal base.gcode --vase body.gcode --at 12.4 -o hybrid.gcode
+$ vaseweld weld --normal base.gcode --vase body.gcode --at 6.2 -o hybrid.gcode
 note: removed the printing time estimate, which cannot be recomputed from these two files
-cut snapped to Z=12.400 (layer 62)
-normal: layers 1-61 (Z 0.200-12.200)
-vase: layers 62-200 (Z 12.400-40.000)
+cut snapped to Z=6.200 (layer 31)
+normal: layers 1-30 (Z 0.200-6.000)
+vase: layers 31-200 (Z 6.200-40.000)
 E mode: absolute -> relative (converted)
-transition ramp: 0.80 -> 1.00 over layer 62
-wrote hybrid.gcode (25389 lines)
+transition ramp: 0.80 -> 1.00 over layer 31
+wrote hybrid.gcode (31343 lines)
 
 $ vaseweld check hybrid.gcode
 OK: Z monotonic, E coherent (relative), retractions balanced, 1 temperature timeline
@@ -75,16 +76,16 @@ OK: Z monotonic, E coherent (relative), retractions balanced, 1 temperature time
 
 The note goes to stderr; everything else goes to stdout. That run is reproducible from this
 repository. `base.gcode` and `body.gcode` are
-`tests/fixtures/prusaslicer_normal_40mm.gcode` and `tests/fixtures/prusaslicer_vase_40mm.gcode`, two
-PrusaSlicer 2.9.6 slices of a 40 mm cylinder at 0.2 mm layers.
+`examples/vase_normal_40mm.gcode` and `examples/vase_spiral_40mm.gcode`, two PrusaSlicer 2.9.6
+slices of `examples/vase_40mm.stl` at 0.2 mm layers.
 
 `--at` is a height in millimetres, not a layer number. It snaps down to the nearest real layer and
 tells you which one:
 
 ```
-$ vaseweld weld --normal base.gcode --vase body.gcode --at 12.5 -o hybrid.gcode
-requested Z=12.500 is between layers, snapping down
-cut snapped to Z=12.400 (layer 62)
+$ vaseweld weld --normal base.gcode --vase body.gcode --at 6.3 -o hybrid.gcode
+requested Z=6.300 is between layers, snapping down
+cut snapped to Z=6.200 (layer 31)
 ...
 ```
 
@@ -92,15 +93,15 @@ Repeat `--at` to alternate again. Two cuts give the shape people actually ask fo
 vase body and a solid lid:
 
 ```
-$ vaseweld weld --normal base.gcode --vase body.gcode --at 12.4 --at 30 -o hybrid.gcode
-cuts snapped to Z=12.400 (layer 62), Z=30.000 (layer 150)
-normal: layers 1-61 (Z 0.200-12.200)
-vase: layers 62-149 (Z 12.400-29.800)
-normal: layers 150-200 (Z 30.000-40.000)
+$ vaseweld weld --normal base.gcode --vase body.gcode --at 6.2 --at 30.2 -o hybrid.gcode
+cuts snapped to Z=6.200 (layer 31), Z=30.200 (layer 151)
+normal: layers 1-30 (Z 0.200-6.000)
+vase: layers 31-150 (Z 6.200-30.000)
+normal: layers 151-200 (Z 30.200-40.000)
 E mode: absolute -> relative (converted)
-transition ramp: 0.80 -> 1.00 over layer 62
-transition ramp: 1.00 -> 0.25 over layer 149
-wrote hybrid.gcode (34498 lines)
+transition ramp: 0.80 -> 1.00 over layer 31
+transition ramp: 1.00 -> 0.25 over layer 150
+wrote hybrid.gcode (45013 lines)
 ```
 
 Every seam gets its own travel, retraction match and flow ramp, so the spiral ramps up where it
@@ -110,7 +111,7 @@ If you would rather not guess at the cut height, ask:
 
 ```
 $ vaseweld layers body.gcode
-prusaslicer_vase_40mm.gcode: 200 layers, Z 0.200 to 40.000
+vase_spiral_40mm.gcode: 200 layers, Z 0.200 to 40.000
 layer height: 0.200 mm
 weldable range: Z 0.400 to 40.000 (layers 2 to 200)
 ```
@@ -118,13 +119,13 @@ weldable range: Z 0.400 to 40.000 (layers 2 to 200)
 `--vase-first` inverts the order, for a vase body with a solid lid on top:
 
 ```
-$ vaseweld weld --normal base.gcode --vase body.gcode --at 25 --vase-first -o hybrid.gcode
-cut snapped to Z=25.000 (layer 125)
-vase: layers 1-124 (Z 0.200-24.800)
-normal: layers 125-200 (Z 25.000-40.000)
+$ vaseweld weld --normal base.gcode --vase body.gcode --at 30.2 --vase-first -o hybrid.gcode
+cut snapped to Z=30.200 (layer 151)
+vase: layers 1-150 (Z 0.200-30.000)
+normal: layers 151-200 (Z 30.200-40.000)
 E mode: absolute -> relative (converted)
-transition ramp: 1.00 -> 0.25 over layer 124
-wrote hybrid.gcode (28421 lines)
+transition ramp: 1.00 -> 0.25 over layer 150
+wrote hybrid.gcode (35289 lines)
 ```
 
 OrcaSlicer files already use relative E, so nothing is converted, and the flow ratios come from the
@@ -206,11 +207,9 @@ wrote hybrid.html (418 KB), open it in any browser
 
 ![The preview at the weld layer: ghosted infill below, the orange spiral starting](docs/preview-weld.png)
 
-That is layer 62 of the two-cut weld. The blue underneath is the last normal layer, walls and gyroid
-infill; the orange loop on top is the first spiral layer. The front view builds up as you scrub, so
-the three sections are visible as they stack:
-
-![The finished weld from the front: blue base, orange vase body, blue lid](docs/preview-stack.png)
+That is layer 31 of the two-cut weld, from above. The ghosted blue underneath is the last normal
+layer, walls and gyroid infill; the orange loop on top is the first spiral layer. The front view
+builds up as you scrub, which is the image at the top of this page.
 
 To rebuild that demo from a fresh clone, with nothing installed:
 
@@ -218,7 +217,7 @@ To rebuild that demo from a fresh clone, with nothing installed:
 python sim/demo.py
 ```
 
-That welds the committed fixtures three ways, runs `vaseweld check` on each, and writes
+That welds the two committed example slices three ways, runs `vaseweld check` on each, and writes
 `docs/demo/index.html` linking the three previews.
 
 ## Proof it prints

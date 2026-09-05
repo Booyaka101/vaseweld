@@ -1,4 +1,6 @@
 tests/fixtures/*.gcode text eol=lf linguist-generated=true
+examples/*.gcode text eol=lf linguist-generated=true
+examples/*.stl binary
 tests/fixtures/*.bgcode binary
 vaseweld.py linguist-generated=true
 
