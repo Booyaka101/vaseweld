@@ -1,7 +1,9 @@
 # PROGRESS
 
-vaseweld 1.3.0. Live at https://github.com/Booyaka101/vaseweld with the demo published at
-https://booyaka101.github.io/vaseweld/. Not on PyPI and not tagged yet.
+vaseweld 1.3.0, published. `pip install vaseweld`, or
+[the release](https://github.com/Booyaka101/vaseweld/releases/tag/v1.3.0) for the exe and the
+standalone script. Demo at https://booyaka101.github.io/vaseweld/. Announced on
+[PrusaSlicer #3204](https://github.com/prusa3d/PrusaSlicer/issues/3204#issuecomment-5551899954).
 
 A stranger can see it work without installing anything: `vaseweld preview` writes a self-contained
 HTML page of the real toolpath, `python sim/demo.py` builds three of them plus an index from a fresh
@@ -105,31 +107,25 @@ green against PrusaSlicer alone.
   `tools/render_preview.py` from the actual output file. The brief asked for a photo; substituting a
   render is the honest option, and it is captioned as a render. **This is the one thing to replace
   before posting anywhere**: print the hybrid, photograph it, drop it in as the lead image.
-- **Not on PyPI, not tagged.** The repo is public and all three workflows are green on `main`, but
-  `twine upload` and `git tag v1.3.0` have not been run.
-- **`pipx run vaseweld` is untested against a real release**, because it resolves from PyPI. The
-  local equivalent (clean venv + wheel + console script) passes. Note the uv/pipx trap: the console
-  script is named `vaseweld`, the same as the package, so `uvx vaseweld` and `pipx run vaseweld`
-  will both work once published.
+- **Nobody has printed one.** The comment on #3204 asks for exactly that, so the next real signal
+  comes from a stranger, not from here.
 
 ## Shipping steps for the owner
 
 1. ~~Push local `main` to a public `Booyaka101/vaseweld`.~~ Done, CI green across
    Linux/macOS/Windows on Python 3.10 to 3.13.
 2. Print the hybrid, photograph it, replace `docs/weld-preview.png` as the lead image (keep the
-   render lower down, it explains the mechanism).
-3. `python -m build && python -m twine upload dist/*` for PyPI.
-4. `git tag v1.3.0 && git push --tags` fires `.github/workflows/release.yml`, which builds
-   `vaseweld.exe`, checks the tag matches `__version__`, and attaches the exe, wheel, sdist and
-   standalone `vaseweld.py` to the GitHub release. Cut the tag only after CI is green on that exact
-   commit.
+   render lower down, it explains the mechanism). **This is the only shipping step still open.**
+3. ~~`python -m build && python -m twine upload dist/*` for PyPI.~~ Done, 1.3.0 is live.
+   `pip install vaseweld` from a clean venv produces byte-identical output to the local wheel.
+4. ~~Tag and release.~~ Done. `v1.3.0` was cut on `26155da` with all 16 checks green, and the
+   release carries the exe, wheel, sdist and standalone `vaseweld.py`.
 5. ~~Enable GitHub Pages.~~ Done, the demo is live at https://booyaka101.github.io/vaseweld/ and rebuilds on every push.
-6. Best first distribution step: comment on
-   [PrusaSlicer #3204](https://github.com/prusa3d/PrusaSlicer/issues/3204). Six years of `+1`, the
-   bot has just labelled it legacy and threatened to auto-close it, and the thread's own regulars
-   have twice asked people to stop posting `+1` and post something substantive. A working tool is
-   that. A draft comment is ready; it needs the repo and Pages URLs filled in and your go before it
-   is posted. The r/3Dprinting and r/prusa3d posts come after, with a print in hand.
+6. ~~Comment on [PrusaSlicer #3204](https://github.com/prusa3d/PrusaSlicer/issues/3204).~~ Posted
+   as [#issuecomment-5551899954](https://github.com/prusa3d/PrusaSlicer/issues/3204#issuecomment-5551899954).
+   It leads with not owning a printer and ends by asking someone to run one, which is the honest
+   position and the thing most likely to get a reply worth having. The r/3Dprinting and r/prusa3d
+   posts come after, with a print in hand.
 
 ## Added in 1.1.0
 
