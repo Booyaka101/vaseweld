@@ -1,0 +1,87 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  exe:
+    name: Build vaseweld.exe
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install --upgrade pip pyinstaller
+      - name: Build the single-file executable
+        run: >
+          pyinstaller --onefile --console --name vaseweld
+          --distpath dist-exe
+          --specpath build-spec
+          --workpath build-work
+          vaseweld.py
+      - name: Run the executable on the committed fixtures
+        shell: bash
+        run: |
+          set -e
+          ./dist-exe/vaseweld.exe --version
+          ./dist-exe/vaseweld.exe weld \
+            --normal tests/fixtures/prusaslicer_normal_40mm.gcode \
+            --vase tests/fixtures/prusaslicer_vase_40mm.gcode \
+            --at 12.4 -o out.gcode
+          ./dist-exe/vaseweld.exe check out.gcode
+      - uses: actions/upload-artifact@v4
+        with:
+          name: vaseweld-exe
+          path: dist-exe/vaseweld.exe
+
+  dist:
+    name: Build the wheel and sdist
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install --upgrade pip build twine pytest
+      - run: python -m pytest -q
+      - run: python -m build
+      - run: python -m twine check dist/*
+      - name: Check the tag matches the packaged version
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          version=$(python -c "import re,pathlib;print(re.search(r'__version__ = \"(.+)\"', pathlib.Path('src/vaseweld/__init__.py').read_text()).group(1))")
+          if [ "${GITHUB_REF_TYPE}" = "tag" ] && [ "$tag" != "$version" ]; then
+            echo "tag $GITHUB_REF_NAME does not match version $version"
+            exit 1
+          fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  publish:
+    name: Attach everything to the GitHub release
+    needs: [exe, dist]
+    runs-on: ubuntu-latest
+    if: github.ref_type == 'tag'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: vaseweld-exe
+          path: release
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: release
+      - run: cp vaseweld.py release/vaseweld.py
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: release/*
+          generate_release_notes: true

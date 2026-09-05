@@ -1,0 +1,47 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        python: ["3.10", "3.11", "3.12", "3.13"]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - run: python -m pip install --upgrade pip pytest
+      - run: python -m pytest -q
+
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install --upgrade pip build twine
+      - run: python -m build
+      - run: python -m twine check dist/*
+      - name: Install the wheel into a clean environment and run it on a fixture
+        run: |
+          python -m venv /tmp/clean
+          /tmp/clean/bin/python -m pip install --quiet dist/*.whl
+          /tmp/clean/bin/vaseweld --version
+          /tmp/clean/bin/vaseweld weld \
+            --normal tests/fixtures/prusaslicer_normal_40mm.gcode \
+            --vase tests/fixtures/prusaslicer_vase_40mm.gcode \
+            --at 12.4 -o /tmp/out.gcode
+          /tmp/clean/bin/vaseweld check /tmp/out.gcode
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/

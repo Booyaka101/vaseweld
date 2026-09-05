@@ -1,0 +1,26 @@
+name: Klipper simulation
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  klipper:
+    name: Plan every weld through Klipper's motion planner
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: docker build -t klipper-batch sim/
+      - run: python sim/build_cases.py
+      - name: Run klippy in batch mode over every case
+        run: docker run --rm -v "$PWD/sim:/work" klipper-batch bash /work/run.sh | tee sim/results.txt
+      - name: Every vaseweld output must plan, and the hand splice must not
+        run: |
+          set -e
+          ! grep -q "FAIL  [134]_" sim/results.txt
+          grep -q "FAIL  2_absolute_naive_text_editor" sim/results.txt
+      - run: python sim/analyse.py

@@ -1,0 +1,8 @@
+tests/fixtures/*.gcode text eol=lf linguist-generated=true
+tests/fixtures/*.bgcode binary
+vaseweld.py linguist-generated=true
+
+# These run inside a Linux container, so CRLF would break them on a Windows clone.
+*.sh text eol=lf
+sim/Dockerfile text eol=lf
+sim/printer.cfg text eol=lf
