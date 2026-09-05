@@ -21,3 +21,4 @@ build-work/
 sim/gcode/
 sim/logs/
 sim/results.txt
+docs/demo/*.gcode

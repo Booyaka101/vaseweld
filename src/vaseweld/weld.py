@@ -22,6 +22,7 @@ from .parser import (
     parse_e_mode,
     parse_move,
     set_e,
+    state_at,
     walk,
 )
 
@@ -326,18 +327,6 @@ def _seam_lines(
     if prime > 1e-4:
         lines.append(move_e(prime, "unretract"))
     return _Seam([], lines)
-
-
-def state_at(gcode: GcodeFile, line_index: int) -> Cursor:
-    """Extruder and nozzle state the file has reached by ``line_index``.
-
-    The layers taken from a file assume the nozzle is where that file left it, so
-    the weld has to resume from this state rather than from nothing.
-    """
-    cursor = Cursor(relative_e=gcode.relative_e)
-    for _ in walk(gcode.lines[:line_index], cursor):
-        pass
-    return cursor
 
 
 def _snap(top: GcodeFile, cut_z: float) -> Layer:

@@ -241,6 +241,39 @@ def walk(lines: list[str], cursor: Cursor):
         yield Step(index, line, "move", delta, dist)
 
 
+def state_at(gcode: GcodeFile, line_index: int) -> Cursor:
+    """Extruder and nozzle state the file has reached by ``line_index``.
+
+    The layers taken from a file assume the nozzle is where that file left it, so
+    the weld has to resume from this state rather than from nothing.
+    """
+    cursor = Cursor(relative_e=gcode.relative_e)
+    for _ in walk(gcode.lines[:line_index], cursor):
+        pass
+    return cursor
+
+
+def config_float(config: dict[str, str], key: str, fallback: float) -> float:
+    """First numeric value of a config key, which slicers sometimes write as a list."""
+    for piece in config.get(key, "").split(","):
+        try:
+            return float(piece.strip())
+        except ValueError:
+            continue
+    return fallback
+
+
+def bead_width(area: float, height: float) -> float:
+    """Width of the bead an extrusion of cross-section ``area`` leaves.
+
+    The usual model: a rectangle of length w-h capped with semicircles of radius
+    h/2, so ``area = h*w - h**2 + pi*h**2/4``. Solved for w.
+    """
+    if height <= 0:
+        return 0.0
+    return (area + height * height * (1.0 - math.pi / 4.0)) / height
+
+
 def read_text(path: Path) -> tuple[list[str], str]:
     """Read a G-code file, refusing binary G-code up front."""
     if path.is_dir():

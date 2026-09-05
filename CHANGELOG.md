@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.2.0
+
+- **`vaseweld preview FILE`** writes one self-contained HTML page: the whole toolpath, every bead
+  drawn at the width the G-code asks for, coloured by which slice it came from. Open it in any
+  browser and drag the slider past a weld to watch stacked layers become a spiral. No server, no
+  dependencies, nothing to install. It is how you show someone the tool works without a printer.
+- **`python sim/demo.py`** welds the committed fixtures three ways, checks each result and builds
+  the previews plus an index page, from a fresh clone with nothing installed.
+- `.github/workflows/pages.yml` publishes that demo to GitHub Pages.
+- Previewing is a single pass over the file rather than re-deriving the extruder state per layer,
+  which took a 34k-line file from about 15 seconds to 0.16.
+
 ## 1.1.0
 
 - **`--at` can be repeated.** Every cut alternates between the two files again, so

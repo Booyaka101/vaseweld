@@ -191,6 +191,33 @@ only and will tell you so rather than guess.
   converted, because leaving them absolute in a relative file would break the print.
 - Writes a `; vaseweld` provenance block into the header naming both inputs and the cut.
 
+## See it without a printer
+
+`vaseweld preview` writes one self-contained HTML file. Open it in any browser and drag the slider:
+every bead is drawn at the width the G-code actually asks for, coloured by which slice it came from.
+
+```
+$ vaseweld preview hybrid.gcode
+wrote hybrid.html (418 KB), open it in any browser
+```
+
+![The preview at the weld layer: ghosted infill below, the orange spiral starting](docs/preview-weld.png)
+
+That is layer 62 of the two-cut weld. The blue underneath is the last normal layer, walls and gyroid
+infill; the orange loop on top is the first spiral layer. The front view builds up as you scrub, so
+the three sections are visible as they stack:
+
+![The finished weld from the front: blue base, orange vase body, blue lid](docs/preview-stack.png)
+
+To rebuild all of it from a fresh clone, with nothing installed:
+
+```
+python sim/demo.py
+```
+
+That welds the committed fixtures three ways, runs `vaseweld check` on each, and writes
+`docs/demo/index.html` linking the three previews.
+
 ## Proof it prints
 
 The unit tests prove the output is well formed. `sim/` proves a printer would accept it, by feeding
@@ -249,9 +276,11 @@ Bead widths at the weld layer, against a 0.450 mm nominal:
 a bead outside half to twice the layer's own nominal width, checked for all three slicers, with a
 companion test that the same measurement does catch a hand splice. See [sim/README.md](sim/README.md).
 
-## check
+## The other commands
 
-`vaseweld check` works on any G-code file, welded or not. It runs four checks:
+`vaseweld layers FILE` prints the Z ladder and the weldable range.
+`vaseweld preview FILE` writes the HTML page above.
+`vaseweld check FILE` works on any G-code file, welded or not. It runs four checks:
 
 | check | what it catches |
 | --- | --- |
@@ -269,6 +298,8 @@ FAIL: 1 problem in broken.gcode
 ```
 
 ## Options
+
+`vaseweld weld` takes:
 
 ```
 --normal PATH          the non-vase slice
@@ -307,7 +338,7 @@ cd vaseweld
 python -m pytest
 ```
 
-128 tests, about 36 seconds, no dependencies beyond pytest. Everything runs against real slicer
+138 tests, about 40 seconds, no dependencies beyond pytest. Everything runs against real slicer
 output committed under `tests/fixtures/`, produced by driving PrusaSlicer 2.9.6, OrcaSlicer 2.4.2
 and BambuStudio 02.08.02.61 from the command line over the models in `examples/`. See
 [tests/fixtures/README.md](tests/fixtures/README.md) for the exact commands.

@@ -210,3 +210,22 @@ def test_layers_refuses_binary_gcode(capsys):
     code, _, stderr = run(["layers", str(fixture("binary_6mm.bgcode"))], capsys)
     assert code == EXIT_USAGE
     assert "binary G-code" in stderr[0]
+
+
+def test_preview_writes_a_page_next_to_the_gcode(tmp_path, capsys):
+    out = tmp_path / "out.gcode"
+    run(weld_argv(output=out), capsys)
+    code, stdout, _ = run(["preview", str(out)], capsys)
+    assert code == EXIT_OK
+    page = out.with_suffix(".html")
+    assert page.exists()
+    assert stdout[0].startswith(f"wrote {page} (")
+    assert "open it in any browser" in stdout[0]
+
+
+def test_preview_refuses_binary_gcode(tmp_path, capsys):
+    code, _, stderr = run(
+        ["preview", str(fixture("binary_6mm.bgcode")), "-o", str(tmp_path / "x.html")], capsys
+    )
+    assert code == EXIT_USAGE
+    assert "binary G-code" in stderr[0]

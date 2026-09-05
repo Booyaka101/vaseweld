@@ -10,6 +10,7 @@ from pathlib import Path
 from . import __version__
 from .compat import CompatError, check_compatible
 from .parser import GcodeError, parse_file
+from .preview import write as write_preview
 from .validate import check as run_check
 from .weld import WeldError, weld
 
@@ -22,6 +23,7 @@ _EPILOG = r"""Slice the same plate twice, once with Spiral Vase off and once on,
   vaseweld layers body.gcode
   vaseweld weld --normal base.gcode --vase body.gcode --at 12.4 -o out.gcode
   vaseweld check out.gcode
+  vaseweld preview out.gcode
 
 Repeat --at to alternate again, so a solid base, a vase body and a solid lid is:
 
@@ -104,6 +106,14 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="weld even if the two files disagree on printer or plate settings",
     )
+
+    preview_cmd = sub.add_parser(
+        "preview",
+        help="write a self-contained HTML page you can open and scrub through",
+        description="Draw the toolpath into one HTML file: no server, no dependencies.",
+    )
+    preview_cmd.add_argument("file", type=Path, help="G-code file to draw")
+    preview_cmd.add_argument("-o", "--output", type=Path, help="defaults to FILE.html")
 
     layers_cmd = sub.add_parser(
         "layers",
@@ -204,6 +214,17 @@ def _run_weld(args: argparse.Namespace, out: "object") -> int:
     return EXIT_OK
 
 
+def _run_preview(args: argparse.Namespace, out: "object") -> int:
+    destination = args.output or args.file.with_suffix(".html")
+    try:
+        written = write_preview(destination, args.file)
+    except OSError as exc:
+        raise GcodeError(f"{destination}: cannot write ({exc.strerror or exc})") from exc
+    size = written.stat().st_size / 1024
+    print(f"wrote {written} ({size:.0f} KB), open it in any browser", file=out)
+    return EXIT_OK
+
+
 def _run_layers(args: argparse.Namespace, out: "object") -> int:
     gcode = parse_file(args.file)
     zs = [layer.z for layer in gcode.layers]
@@ -243,6 +264,8 @@ def main(argv: list[str] | None = None, out: "object" = None) -> int:
             return _run_weld(args, out)
         if args.command == "layers":
             return _run_layers(args, out)
+        if args.command == "preview":
+            return _run_preview(args, out)
         return _run_check(args, out)
     except (GcodeError, CompatError, WeldError) as exc:
         print(f"vaseweld: {exc}", file=sys.stderr)

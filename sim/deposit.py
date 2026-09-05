@@ -26,7 +26,14 @@ from PIL import Image
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "src"))
 
-from vaseweld.parser import GcodeFile, parse_file, parse_move, walk  # noqa: E402
+from vaseweld.parser import (  # noqa: E402
+    GcodeFile,
+    bead_width,
+    config_float,
+    parse_file,
+    parse_move,
+    walk,
+)
 from vaseweld.weld import state_at  # noqa: E402
 
 BACKGROUND = (250, 250, 249)
@@ -44,22 +51,6 @@ class Bead:
     width: float  # mm
     height: float  # mm
     layer: int
-
-
-def _config_float(gcode: GcodeFile, key: str, fallback: float) -> float:
-    for piece in gcode.config.get(key, "").split(","):
-        try:
-            return float(piece.strip())
-        except ValueError:
-            continue
-    return fallback
-
-
-def bead_width(area: float, height: float) -> float:
-    """Width of a rectangle-with-round-ends bead of cross-section ``area``."""
-    if height <= 0:
-        return 0.0
-    return (area + height * height * (1.0 - math.pi / 4.0)) / height
 
 
 def centre_of(gcode: GcodeFile) -> tuple[float, float]:
@@ -80,9 +71,9 @@ def deposit(gcode: GcodeFile, angle_deg: float) -> list[Bead]:
     cx, cy = centre_of(gcode)
     theta = math.radians(angle_deg)
     ux, uy = math.cos(theta), math.sin(theta)
-    diameter = _config_float(gcode, "filament_diameter", 1.75)
+    diameter = config_float(gcode.config, "filament_diameter", 1.75)
     filament_area = math.pi * (diameter / 2.0) ** 2
-    height = _config_float(gcode, "layer_height", 0.2)
+    height = config_float(gcode.config, "layer_height", 0.2)
 
     bounds = [(layer.start, layer.index) for layer in gcode.layers]
     beads: list[Bead] = []
@@ -139,8 +130,8 @@ class Trace:
 def plan_layer(gcode: GcodeFile, layer_index: int) -> list[Trace]:
     """Every extruding move of one layer, with the bead width it lays."""
     layer = gcode.layers[layer_index - 1]
-    diameter = _config_float(gcode, "filament_diameter", 1.75)
-    height = _config_float(gcode, "layer_height", 0.2)
+    diameter = config_float(gcode.config, "filament_diameter", 1.75)
+    height = config_float(gcode.config, "layer_height", 0.2)
     filament_area = math.pi * (diameter / 2.0) ** 2
     cursor = state_at(gcode, layer.start)
     traces: list[Trace] = []
