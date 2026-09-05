@@ -1,10 +1,13 @@
 <!doctype html>
 <html lang="en">
 <meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>base-vase-lid.gcode - vaseweld preview</title>
 <style>
   :root { color-scheme: light dark; }
-  body { margin: 0; font: 14px/1.5 system-ui, sans-serif; background: #fafaf9; color: #3c3c41; }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 14px/1.5 system-ui, sans-serif; background: #fafaf9; color: #3c3c41;
+         overflow-x: hidden; }
   header { padding: 14px 18px 8px; }
   h1 { margin: 0; font-size: 16px; font-weight: 600; }
   .sub { color: #85858c; font-size: 13px; }
@@ -12,12 +15,38 @@
   .key { display: flex; align-items: center; gap: 6px; }
   .key i { width: 11px; height: 11px; border-radius: 2px; display: inline-block; }
   main { display: flex; gap: 18px; padding: 0 18px 18px; flex-wrap: wrap; }
-  canvas { background: #fff; border: 1px solid #e6e6e3; border-radius: 6px; touch-action: none; }
-  .panel { display: flex; flex-direction: column; gap: 6px; }
+  /* The canvas must be sized by CSS. With only the width/height attributes, setting
+     canvas.width for the device pixel ratio also changes its layout width, which
+     feeds back and blows the element up on any HiDPI screen. */
+  canvas { background: #fff; border: 1px solid #e6e6e3; border-radius: 6px; touch-action: none;
+           display: block; width: 100%; height: auto; }
+  #top { aspect-ratio: 1 / 1; }
+  #side { aspect-ratio: 3 / 4; }
+  .panel { display: flex; flex-direction: column; gap: 6px; min-width: 0; flex: 1 1 300px;
+           max-width: 560px; }
   .cap { font-size: 12px; color: #85858c; }
   .controls { padding: 0 18px 20px; display: flex; align-items: center; gap: 12px;
-              flex-wrap: wrap; max-width: 1100px; }
-  input[type=range] { flex: 1 1 320px; }
+              flex-wrap: wrap; }
+  @media (max-width: 700px) {
+    header, main, .controls { padding-left: 12px; padding-right: 12px; }
+    .legend { gap: 6px; flex-direction: column; }
+    .readout { min-width: 0; font-size: 13px; }
+    /* Both views, their labels and the slider have to fit one phone screen, or the
+       front view draws its content below the fold where nobody sees it. */
+    h1 { font-size: 15px; }
+    .sub { display: none; }
+    .legend { font-size: 12px; margin-top: 6px; }
+    .cap { font-size: 11px; }
+    canvas { max-height: 29vh; }
+    main { gap: 8px; padding-bottom: 8px; }
+    .panel { gap: 2px; }
+    .controls { position: sticky; bottom: 0; padding-top: 10px; padding-bottom: 12px;
+                background: #fafaf9; border-top: 1px solid #e6e6e3; }
+  }
+  @media (max-width: 700px) and (prefers-color-scheme: dark) {
+    .controls { background: #17171a; border-top-color: #34343a; }
+  }
+  input[type=range] { flex: 1 1 180px; min-width: 0; }
   button { font: inherit; padding: 4px 12px; border: 1px solid #d0d0cc; border-radius: 5px;
            background: #fff; cursor: pointer; }
   button:hover { background: #f2f2ef; }
@@ -61,17 +90,19 @@ const topView = document.getElementById("top"), sideView = document.getElementBy
 const slider = document.getElementById("slider"), readout = document.getElementById("readout");
 const stack = document.getElementById("stack"), play = document.getElementById("play");
 slider.max = layers.length;
-slider.value = layers.length;
+// Land on the first weld, which is the thing worth looking at, not the finished lid.
+slider.value = cuts.size ? Math.min(...DATA.cuts) : layers.length;
 
 function fit(canvas, w, h) {
-  const dpr = window.devicePixelRatio || 1;
-  canvas.width = canvas.clientWidth * dpr;
-  canvas.height = canvas.clientHeight * dpr;
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  const box = canvas.getBoundingClientRect();
+  canvas.width = Math.max(1, Math.round(box.width * dpr));
+  canvas.height = Math.max(1, Math.round(box.height * dpr));
   const ctx = canvas.getContext("2d");
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   const pad = 14;
-  const scale = Math.min((canvas.clientWidth - 2 * pad) / w, (canvas.clientHeight - 2 * pad) / h);
-  return { ctx, scale, pad };
+  const scale = Math.min((box.width - 2 * pad) / w, (box.height - 2 * pad) / h);
+  return { ctx, scale, pad, width: box.width, height: box.height };
 }
 
 function strokePath(ctx, pts, project) {
@@ -91,16 +122,15 @@ function draw() {
 
   const w = maxX - minX, h = maxY - minY;
   const a = fit(topView, w, h);
-  a.ctx.clearRect(0, 0, topView.clientWidth, topView.clientHeight);
-  const ox = (topView.clientWidth - w * a.scale) / 2, oy = (topView.clientHeight - h * a.scale) / 2;
-  const toTop = (x, y) => [ox + (x - minX) * a.scale, topView.clientHeight - oy - (y - minY) * a.scale];
+  a.ctx.clearRect(0, 0, a.width, a.height);
+  const ox = (a.width - w * a.scale) / 2, oy = (a.height - h * a.scale) / 2;
+  const toTop = (x, y) => [ox + (x - minX) * a.scale, a.height - oy - (y - minY) * a.scale];
 
   const zSpan = Math.max(maxZ - minZ, 0.001);
   const b = fit(sideView, w, zSpan);
-  b.ctx.clearRect(0, 0, sideView.clientWidth, sideView.clientHeight);
-  const sx = (sideView.clientWidth - w * b.scale) / 2, sy = (sideView.clientHeight - zSpan * b.scale) / 2;
-  const toSide = (x, zz) => [sx + (x - minX) * b.scale,
-                             sideView.clientHeight - sy - (zz - minZ) * b.scale];
+  b.ctx.clearRect(0, 0, b.width, b.height);
+  const sx = (b.width - w * b.scale) / 2, sy = (b.height - zSpan * b.scale) / 2;
+  const toSide = (x, zz) => [sx + (x - minX) * b.scale, b.height - sy - (zz - minZ) * b.scale];
 
   a.ctx.lineCap = b.ctx.lineCap = "round";
   a.ctx.lineJoin = b.ctx.lineJoin = "round";
@@ -143,9 +173,15 @@ play.onclick = () => {
     if (+slider.value >= layers.length) { clearInterval(timer); timer = null; play.textContent = "Play"; }
   }, 1000 / 60);
 };
-slider.oninput = draw;
-stack.onchange = draw;
-addEventListener("resize", draw);
+let queued = false;
+function schedule() {
+  if (queued) return;
+  queued = true;
+  requestAnimationFrame(() => { queued = false; draw(); });
+}
+slider.oninput = schedule;
+stack.onchange = schedule;
+addEventListener("resize", schedule);
 draw();
 })();
 </script>

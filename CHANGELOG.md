@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.2.1
+
+- The preview was broken on phones and on any HiDPI screen. It had no viewport meta tag, so phones
+  laid it out at 980 px and zoomed out, and the canvases had no CSS width, so setting
+  `canvas.width` for the device pixel ratio also changed the element's layout width and blew it up
+  to 1560 px. Both are fixed: the canvas is sized by CSS and the backing store follows it.
+- On a narrow screen the two views and the slider now fit one screen, with the controls pinned to
+  the bottom. Before this the front view drew its content below the fold.
+- The slider starts at the first weld rather than the last layer, which is the thing worth looking
+  at rather than a finished lid.
+- Redraws are throttled to one per frame, so dragging the slider on a phone does not queue work.
+
 ## 1.2.0
 
 - **`vaseweld preview FILE`** writes one self-contained HTML page: the whole toolpath, every bead

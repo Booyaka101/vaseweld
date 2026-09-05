@@ -1,6 +1,6 @@
 # PROGRESS
 
-vaseweld 1.2.0. Live at https://github.com/Booyaka101/vaseweld with the demo published at
+vaseweld 1.2.1. Live at https://github.com/Booyaka101/vaseweld with the demo published at
 https://booyaka101.github.io/vaseweld/. Not on PyPI and not tagged yet.
 
 A stranger can see it work without installing anything: `vaseweld preview` writes a self-contained
@@ -60,6 +60,13 @@ green against PrusaSlicer alone.
 
 ## Handled in the last pass
 
+- **The preview was broken on every phone and every HiDPI screen.** No viewport meta tag, and the
+  canvases had no CSS width so the device-pixel-ratio resize fed back into layout and grew them to
+  1560 px. It was only ever checked at 1180x900 with dpr 1, which is the one configuration that
+  hides both faults. Now verified at 360, 390, 414, 768, 1180 and 1440 across dpr 1, 2 and 3, by
+  measuring that the drawn content of both canvases lands inside the viewport rather than by
+  looking at a screenshot.
+
 - The repository branch was `master` while both workflows trigger on `main` and the README links
   `raw.githubusercontent.com/.../main/vaseweld.py`. CI would never have fired. Renamed to `main`.
 - CRLF input now has a test. The behaviour was already right (the newline style is detected and
@@ -82,7 +89,7 @@ green against PrusaSlicer alone.
   render is the honest option, and it is captioned as a render. **This is the one thing to replace
   before posting anywhere**: print the hybrid, photograph it, drop it in as the lead image.
 - **Not on PyPI, not tagged.** The repo is public and all three workflows are green on `main`, but
-  `twine upload` and `git tag v1.2.0` have not been run.
+  `twine upload` and `git tag v1.2.1` have not been run.
 - **`pipx run vaseweld` is untested against a real release**, because it resolves from PyPI. The
   local equivalent (clean venv + wheel + console script) passes. Note the uv/pipx trap: the console
   script is named `vaseweld`, the same as the package, so `uvx vaseweld` and `pipx run vaseweld`
@@ -95,7 +102,7 @@ green against PrusaSlicer alone.
 2. Print the hybrid, photograph it, replace `docs/weld-preview.png` as the lead image (keep the
    render lower down, it explains the mechanism).
 3. `python -m build && python -m twine upload dist/*` for PyPI.
-4. `git tag v1.2.0 && git push --tags` fires `.github/workflows/release.yml`, which builds
+4. `git tag v1.2.1 && git push --tags` fires `.github/workflows/release.yml`, which builds
    `vaseweld.exe`, checks the tag matches `__version__`, and attaches the exe, wheel, sdist and
    standalone `vaseweld.py` to the GitHub release. Cut the tag only after CI is green on that exact
    commit.

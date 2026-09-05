@@ -99,9 +99,11 @@ def _index(cases: list[tuple[str, str, str, str, bool]]) -> str:
 _INDEX = """<!doctype html>
 <html lang="en">
 <meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>vaseweld demo</title>
 <style>
   :root { color-scheme: light dark; }
+  * { box-sizing: border-box; }
   body { margin: 0 auto; padding: 32px 20px; max-width: 780px;
          font: 15px/1.6 system-ui, sans-serif; background: #fafaf9; color: #3c3c41; }
   h1 { font-size: 21px; margin: 0 0 4px; }
