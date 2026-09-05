@@ -76,8 +76,8 @@ green against PrusaSlicer alone.
   `tools/render_preview.py` from the actual output file. The brief asked for a photo; substituting a
   render is the honest option, and it is captioned as a render. **This is the one thing to replace
   before posting anywhere**: print the hybrid, photograph it, drop it in as the lead image.
-- **Not published.** No PyPI upload, no GitHub repo, no release tag. `git init` was run and files
-  are staged locally only.
+- **Not published.** Committed locally on `main` (`499ffd3`, `3ff8488`) but no remote, no PyPI
+  upload and no release tag.
 - **`pipx run vaseweld` is untested against a real release**, because it resolves from PyPI. The
   local equivalent (clean venv + wheel + console script) passes. Note the uv/pipx trap: the console
   script is named `vaseweld`, the same as the package, so `uvx vaseweld` and `pipx run vaseweld`
@@ -85,7 +85,7 @@ green against PrusaSlicer alone.
 
 ## Shipping steps for the owner
 
-1. `git add -A && git commit` and push to a public `Booyaka101/vaseweld`.
+1. Push the two local commits to a public `Booyaka101/vaseweld`.
 2. Print the hybrid, photograph it, replace `docs/weld-preview.png` as the lead image (keep the
    render lower down, it explains the mechanism).
 3. `python -m build && python -m twine upload dist/*` for PyPI.
