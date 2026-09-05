@@ -1,6 +1,6 @@
 # PROGRESS
 
-vaseweld 1.0.0. Feature complete and verified locally. Not published (that is the owner's step).
+vaseweld 1.1.0. Feature complete and verified locally. Not published (that is the owner's step).
 
 ## Verified working
 
@@ -19,7 +19,7 @@ Every claim below was executed on this machine, not inferred.
 - **Three delivery paths, byte-identical output.** Wheel installed into a clean venv, standalone
   `vaseweld.py`, and a PyInstaller `vaseweld.exe` built and run on Windows. All three produced
   sha256 `5c03b42c1bf4ac10...` for the same weld.
-- **117 tests pass** with `python -m pytest`, about 30 seconds. That includes a matrix that welds
+- **128 tests pass** with `python -m pytest`, about 30 seconds. That includes a matrix that welds
   all three slicers in both directions at two cut heights and runs `check` on every result.
 - **Three slicers, both directions, two cut heights.** All twelve welds pass `vaseweld check`.
 - **A real printer firmware accepts the output.** `sim/` builds Klipper for its `linux` MCU target
@@ -99,14 +99,19 @@ green against PrusaSlicer alone.
    substantive. A working tool with a photo is that. The r/3Dprinting and r/prusa3d posts come after,
    with the print in hand.
 
+## Added in 1.1.0
+
+- **Repeatable `--at`.** Every cut alternates between the two files again, so one run can produce a
+  solid base, a vase body and a solid lid. Each seam gets its own travel, retraction match and flow
+  ramp. Verified through Klipper (`5_*_vaseweld_two_cuts` plans cleanly) and through the deposition
+  model at both seams: 0.425 mm ramping in at layer 62, 0.239 mm ramping out at 149, 0.450 mm again
+  at 150.
+- **`vaseweld layers FILE`** prints the ladder and the weldable range.
+
 ## Next steps, in the order they are worth doing
 
-- **More than one weld point per run.** A solid base, a vase body and a solid lid needs two welds
-  today. `--at 12.4 --at 30` alternating between the two files is the obvious shape, and the planner
-  is already a list of layer ranges. This is the single most requested variant in the source issues.
 - **A `preview` command.** `tools/render_preview.py` already draws the seam but needs Pillow and is
   not shipped. A stdlib SVG version would let a user eyeball their own weld before printing.
-- **`--list-layers`** to print the Z ladder, so a user picks a cut without guessing and re-running.
 - **`.bgcode` passthrough** by shelling out to the `bgcode` converter when it is on PATH, instead of
   refusing.
 - **Cura.** `parser.py` already recognises Cura's `;LAYER:` markers, but Cura writes no config block,

@@ -19,6 +19,7 @@ from vaseweld.weld import weld  # noqa: E402
 
 CUT_Z = 3.0
 CUT_LAYER = 15  # Z 3.0 at 0.2 mm layers
+SECOND_CUT_Z = 4.6  # layer 23, for the solid base / vase body / solid lid case
 
 PAIRS = {
     "absolute": (
@@ -61,13 +62,14 @@ def main() -> None:
         write(f"1_{mode}_source_normal", normal.lines)
         write(f"1_{mode}_source_vase", vase.lines)
         write(f"2_{mode}_naive_text_editor", naive_splice(normal, vase))
-        write(
-            f"3_{mode}_vaseweld",
-            weld(normal, vase, CUT_Z, bottom_role="normal", top_role="vase").lines,
-        )
+        write(f"3_{mode}_vaseweld", weld(normal, vase, CUT_Z).lines)
         write(
             f"4_{mode}_vaseweld_vase_first",
-            weld(vase, normal, CUT_Z, bottom_role="vase", top_role="normal").lines,
+            weld(normal, vase, CUT_Z, first_role="vase").lines,
+        )
+        write(
+            f"5_{mode}_vaseweld_two_cuts",
+            weld(normal, vase, [CUT_Z, SECOND_CUT_Z]).lines,
         )
 
 

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "vaseweld"
-version = "1.0.0"
+version = "1.1.0"
 description = "Weld two G-code files sliced from the same plate so spiral vase mode can start or stop partway up a print."
 readme = "README.md"
 requires-python = ">=3.10"

@@ -19,26 +19,50 @@ def run(argv, capsys):
     return code, captured.out.splitlines(), captured.err.splitlines()
 
 
-def test_weld_then_check(tmp_path, capsys):
+@pytest.mark.parametrize(
+    "cuts, expected",
+    [
+        pytest.param(
+            [],
+            [
+                "cut snapped to Z=12.400 (layer 62)",
+                "normal: layers 1-61 (Z 0.200-12.200)",
+                "vase: layers 62-200 (Z 12.400-40.000)",
+                "E mode: absolute -> relative (converted)",
+                "transition ramp: 0.80 -> 1.00 over layer 62",
+            ],
+            id="one-cut",
+        ),
+        pytest.param(
+            ["--at", "30"],
+            [
+                "cuts snapped to Z=12.400 (layer 62), Z=30.000 (layer 150)",
+                "normal: layers 1-61 (Z 0.200-12.200)",
+                "vase: layers 62-149 (Z 12.400-29.800)",
+                "normal: layers 150-200 (Z 30.000-40.000)",
+                "E mode: absolute -> relative (converted)",
+                "transition ramp: 0.80 -> 1.00 over layer 62",
+                "transition ramp: 1.00 -> 0.25 over layer 149",
+            ],
+            id="two-cuts",
+        ),
+    ],
+)
+def test_weld_then_check(tmp_path, capsys, cuts, expected):
     out = tmp_path / "out.gcode"
     code, stdout, _ = run(
         weld_argv(
             normal="prusaslicer_normal_40mm.gcode",
             vase="prusaslicer_vase_40mm.gcode",
             at="12.4",
+            extra=cuts,
             output=out,
         ),
         capsys,
     )
     assert code == EXIT_OK
-    assert stdout[:5] == [
-        "cut snapped to Z=12.400 (layer 62)",
-        "normal: layers 1-61 (Z 0.200-12.200)",
-        "vase: layers 62-200 (Z 12.400-40.000)",
-        "E mode: absolute -> relative (converted)",
-        "transition ramp: 0.80 -> 1.00 over layer 62",
-    ]
-    assert stdout[5] == f"wrote {out} ({len(out.read_text(encoding='utf-8').splitlines())} lines)"
+    assert stdout[:-1] == expected
+    assert stdout[-1] == f"wrote {out} ({len(out.read_text(encoding='utf-8').splitlines())} lines)"
 
     code, stdout, _ = run(["check", str(out)], capsys)
     assert code == EXIT_OK
@@ -162,3 +186,27 @@ def test_force_reports_the_seam_step_it_created(tmp_path, capsys):
     )
     assert code == EXIT_OK
     assert any("0.200 mm step" in line and "150%" in line for line in stderr)
+
+
+def test_layers_reports_the_ladder(capsys):
+    code, stdout, _ = run(["layers", str(fixture("prusaslicer_vase_40mm.gcode"))], capsys)
+    assert code == EXIT_OK
+    assert stdout == [
+        "prusaslicer_vase_40mm.gcode: 200 layers, Z 0.200 to 40.000",
+        "layer height: 0.200 mm",
+        "weldable range: Z 0.400 to 40.000 (layers 2 to 200)",
+    ]
+
+
+def test_layers_all_prints_every_layer(capsys):
+    code, stdout, _ = run(["layers", str(fixture("prusaslicer_vase_40mm.gcode")), "--all"], capsys)
+    assert code == EXIT_OK
+    assert len(stdout) == 203
+    assert stdout[3].strip() == "layer    1  Z 0.200"
+    assert stdout[-1].strip() == "layer  200  Z 40.000"
+
+
+def test_layers_refuses_binary_gcode(capsys):
+    code, _, stderr = run(["layers", str(fixture("binary_6mm.bgcode"))], capsys)
+    assert code == EXIT_USAGE
+    assert "binary G-code" in stderr[0]

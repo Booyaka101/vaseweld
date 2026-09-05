@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.1.0
+
+- **`--at` can be repeated.** Every cut alternates between the two files again, so
+  `--at 12.4 --at 30` gives a solid base, a vase body and a solid lid in one run. Each seam gets its
+  own travel, retraction match and flow ramp: the spiral ramps up where it starts and back down
+  where it ends. This is the variant the slicer issues ask for most often after the feature itself.
+- **`vaseweld layers FILE`** prints the Z ladder, the layer height and the weldable range, so you
+  can pick a cut without guessing and re-running. `--all` lists every layer.
+- A vase section only one layer tall ramps flow up but not back down, and says so.
+- `weld()` now takes `(normal, vase, cut_z, first_role=...)` where `cut_z` is a height or a list of
+  them. The old `bottom`/`top` plus `bottom_role`/`top_role` form is gone; the command line is
+  unchanged apart from `--at` accepting repeats.
+
 ## 1.0.0
 
 First release.

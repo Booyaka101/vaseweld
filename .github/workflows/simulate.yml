@@ -21,6 +21,6 @@ jobs:
       - name: Every vaseweld output must plan, and the hand splice must not
         run: |
           set -e
-          ! grep -q "FAIL  [134]_" sim/results.txt
+          ! grep -q "FAIL  [1345]_" sim/results.txt
           grep -q "FAIL  2_absolute_naive_text_editor" sim/results.txt
       - run: python sim/analyse.py

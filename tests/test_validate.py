@@ -14,7 +14,7 @@ from vaseweld.weld import weld
 
 @pytest.fixture(scope="module")
 def welded_lines(ps_normal, ps_vase):
-    return weld(ps_normal, ps_vase, 12.4, bottom_role="normal", top_role="vase").lines
+    return weld(ps_normal, ps_vase, 12.4).lines
 
 
 @pytest.fixture

@@ -60,40 +60,95 @@ class WeldError(Exception):
     """The requested weld cannot be performed."""
 
 
+@dataclass(slots=True)
+class Cut:
+    """One weld point: where it was asked for and which layer it landed on."""
+
+    requested: float
+    z: float
+    layer: int
+
+
+@dataclass(slots=True)
+class Slab:
+    """A run of layers taken from one of the two files."""
+
+    role: str  # "normal" or "vase"
+    layers: tuple[int, int]  # first and last, in the source file's own numbering
+    z: tuple[float, float]
+
+
 @dataclass
 class WeldResult:
     lines: list[str]
     newline: str
-    cut_z: float
-    requested_z: float
-    cut_layer: int
-    bottom_role: str
-    top_role: str
-    bottom_range: tuple[int, int]
-    top_range: tuple[int, int]
-    bottom_z: tuple[float, float]
-    top_z: tuple[float, float]
+    cuts: list[Cut]
+    slabs: list[Slab]
     e_mode_note: str
-    ramp_note: str
+    ramps: list[str]
     stats_note: str
     stats_removed: list[str]
     warnings: list[str]
 
+    # The single-cut shape, which is what almost every weld is.
+    @property
+    def cut_z(self) -> float:
+        return self.cuts[0].z
+
+    @property
+    def requested_z(self) -> float:
+        return self.cuts[0].requested
+
+    @property
+    def cut_layer(self) -> int:
+        return self.cuts[0].layer
+
+    @property
+    def bottom_role(self) -> str:
+        return self.slabs[0].role
+
+    @property
+    def top_role(self) -> str:
+        return self.slabs[-1].role
+
+    @property
+    def bottom_range(self) -> tuple[int, int]:
+        return self.slabs[0].layers
+
+    @property
+    def top_range(self) -> tuple[int, int]:
+        return self.slabs[-1].layers
+
+    @property
+    def bottom_z(self) -> tuple[float, float]:
+        return self.slabs[0].z
+
+    @property
+    def top_z(self) -> tuple[float, float]:
+        return self.slabs[-1].z
+
+    @property
+    def ramp_note(self) -> str:
+        return self.ramps[0]
+
     def summary(self) -> list[str]:
-        out = []
-        if abs(self.requested_z - self.cut_z) > 1e-9:
-            out.append(f"requested Z={self.requested_z:.3f} is between layers, snapping down")
-        out.append(f"cut snapped to Z={self.cut_z:.3f} (layer {self.cut_layer})")
+        out = [
+            f"requested Z={cut.requested:.3f} is between layers, snapping down"
+            for cut in self.cuts
+            if abs(cut.requested - cut.z) > 1e-9
+        ]
+        label = "cut" if len(self.cuts) == 1 else "cuts"
         out.append(
-            f"{self.bottom_role}: layers {self.bottom_range[0]}-{self.bottom_range[1]} "
-            f"(Z {self.bottom_z[0]:.3f}-{self.bottom_z[1]:.3f})"
+            f"{label} snapped to "
+            + ", ".join(f"Z={cut.z:.3f} (layer {cut.layer})" for cut in self.cuts)
         )
-        out.append(
-            f"{self.top_role}: layers {self.top_range[0]}-{self.top_range[1]} "
-            f"(Z {self.top_z[0]:.3f}-{self.top_z[1]:.3f})"
-        )
+        out += [
+            f"{slab.role}: layers {slab.layers[0]}-{slab.layers[1]} "
+            f"(Z {slab.z[0]:.3f}-{slab.z[1]:.3f})"
+            for slab in self.slabs
+        ]
         out.append(f"E mode: {self.e_mode_note}")
-        out.append(f"transition ramp: {self.ramp_note}")
+        out += [f"transition ramp: {ramp}" for ramp in self.ramps]
         return out
 
 
@@ -338,42 +393,53 @@ def _m73_remaining(lines: list[str]) -> float | None:
 
 @dataclass
 class _Progress:
-    """Remaps M73 reporting across the seam using the two files' own R values.
+    """Remaps M73 reporting across every seam using the files' own R values.
 
-    R is minutes remaining, so elapsed-at-the-cut is ``total - R`` in the bottom
-    file and the top file's own R values are already correct after the cut.
+    R is minutes remaining, so a region that starts with R=a and ends with R=b took
+    a-b minutes. Summing those gives the welded total, and any line inside a region
+    is that region's own elapsed time plus everything before it.
     """
 
-    bottom_total: float
-    bottom_remaining_at_cut: float
-    top_remaining_at_cut: float
+    spans: list[tuple[float, float]]  # (R at the start, R at the end) per region
+    fractions: list[float]  # each region's share of its own file's time
+
+    @property
+    def durations(self) -> list[float]:
+        return [max(0.0, start - end) for start, end in self.spans]
 
     @property
     def welded_total(self) -> float:
-        return (self.bottom_total - self.bottom_remaining_at_cut) + self.top_remaining_at_cut
+        return sum(self.durations)
 
-    def rewrite(self, line: str, *, from_bottom: bool) -> str:
+    def rewrite(self, line: str, region: int) -> str:
         found = _M73_R.search(line)
         if found is None:
             return line
         total = self.welded_total
-        value = float(found.group(1))
-        remaining = max(0.0, total - self.bottom_total + value) if from_bottom else value
-        elapsed = max(0.0, total - remaining)
+        before = sum(self.durations[:region])
+        elapsed = before + max(0.0, self.spans[region][0] - float(found.group(1)))
+        elapsed = min(elapsed, total)
         percent = 0 if total <= 0 else min(100, int(round(100 * elapsed / total)))
-        line = _M73_R.sub(f"R{int(round(remaining))}", line, count=1)
+        line = _M73_R.sub(f"R{int(round(total - elapsed))}", line, count=1)
         return _M73_P.sub(f"P{percent}", line, count=1)
 
 
-def _build_progress(
-    bottom: GcodeFile, bottom_end: int, top: GcodeFile, top_start: int
-) -> _Progress | None:
-    total = _m73_remaining(bottom.lines)
-    at_cut = _m73_remaining(list(reversed(bottom.lines[:bottom_end])))
-    top_at_cut = _m73_remaining(top.lines[top_start:])
-    if total is None or at_cut is None or top_at_cut is None:
-        return None
-    return _Progress(total, at_cut, top_at_cut)
+def _build_progress(regions: list["_Region"]) -> _Progress | None:
+    spans: list[tuple[float, float]] = []
+    fractions: list[float] = []
+    for position, region in enumerate(regions):
+        source = region.source
+        file_total = _m73_remaining(source.lines)
+        # The header belongs to the first region, so it starts at the file's total.
+        start = (
+            file_total if position == 0 else _m73_remaining(source.lines[region.layers[0].start :])
+        )
+        end = _m73_remaining(source.lines[region.layers[-1].end :])
+        if file_total is None or start is None or end is None or file_total <= 0:
+            return None
+        spans.append((start, end))
+        fractions.append(max(0.0, start - end) / file_total)
+    return _Progress(spans, fractions)
 
 
 def _material_totals(net_e_mm: float, config: dict[str, str]) -> dict[str, float]:
@@ -410,18 +476,21 @@ def _renumber_layers(
                 chunk[i] = _TOTAL_LAYER_COMMENT.sub(lambda m: f"{m.group(1)}{total_layers}", line)
 
 
-def _welded_seconds(bottom: GcodeFile, top: GcodeFile, progress: _Progress | None) -> float | None:
-    """Split each file's own time estimate at the cut using its M73 remaining times."""
-    if progress is None or progress.bottom_total <= 0:
+def _welded_seconds(regions: list["_Region"], progress: _Progress | None) -> float | None:
+    """Take each region's share of its own file's time estimate and add them up.
+
+    The shares come from the M73 remaining times, which are whole minutes, so the
+    file's own second-resolution estimate is what gets scaled.
+    """
+    if progress is None:
         return None
-    bottom_seconds = _time_comment_seconds(bottom.lines, "estimated printing time")
-    top_seconds = _time_comment_seconds(top.lines, "estimated printing time")
-    top_total = _m73_remaining(top.lines)
-    if bottom_seconds is None or top_seconds is None or not top_total:
-        return progress.welded_total * 60.0
-    done = 1.0 - progress.bottom_remaining_at_cut / progress.bottom_total
-    left = progress.top_remaining_at_cut / top_total
-    return bottom_seconds * done + top_seconds * left
+    total = 0.0
+    for region, fraction in zip(regions, progress.fractions):
+        seconds = _time_comment_seconds(region.source.lines, "estimated printing time")
+        if seconds is None:
+            return progress.welded_total * 60.0
+        total += seconds * fraction
+    return total
 
 
 def _bambu_total(line: str, material: dict[str, float]) -> str:
@@ -472,23 +541,16 @@ def _rewrite_stats(
     lines[:] = out
 
 
-def _provenance(
-    *,
-    bottom: GcodeFile,
-    top: GcodeFile,
-    bottom_role: str,
-    top_role: str,
-    cut_layer: Layer,
-    kept_bottom: list[Layer],
-    top_kept: list[Layer],
-) -> list[str]:
-    return [
-        f"; vaseweld {__version__}: welded at Z={cut_layer.z:.3f} (layer {cut_layer.index})",
-        f";   layers {kept_bottom[0].index}-{kept_bottom[-1].index} from "
-        f"{bottom.path.name} ({bottom_role})",
-        f";   layers {top_kept[0].index}-{top_kept[-1].index} from {top.path.name} ({top_role})",
-        ";   extrusion is relative (M83) across the whole file",
+def _provenance(plan: _Plan) -> list[str]:
+    where = ", ".join(f"Z={cut.z:.3f} (layer {cut.layer})" for cut in plan.cuts)
+    banner = [f"; vaseweld {__version__}: welded at {where}"]
+    banner += [
+        f";   layers {region.layers[0].index}-{region.layers[-1].index} from "
+        f"{region.source.path.name} ({region.role})"
+        for region in plan.regions
     ]
+    banner.append(";   extrusion is relative (M83) across the whole file")
+    return banner
 
 
 def _e_mode_note(bottom: GcodeFile, top: GcodeFile) -> str:
@@ -504,23 +566,29 @@ def _e_mode_note(bottom: GcodeFile, top: GcodeFile) -> str:
 
 
 @dataclass
-class _Plan:
-    """Which layers come from which file, and how the flow ramp is configured."""
+class _Region:
+    """A run of layers taken from one file, between two cuts."""
 
-    cut_layer: Layer
-    kept_bottom: list[Layer]
-    top_kept: list[Layer]
+    source: GcodeFile
+    role: str
+    layers: list[Layer]
+    ramp_in: bool = False  # the spiral starts here
+    ramp_out: bool = False  # the spiral ends here
+
+
+@dataclass
+class _Plan:
+    """Which layers come from which file, and how the flow ramps are configured."""
+
+    regions: list[_Region]
+    cuts: list[Cut]
     start_flow: float
     finish_flow: float
     warnings: list[str] = field(default_factory=list)
 
     @property
-    def bottom_last(self) -> Layer:
-        return self.kept_bottom[-1]
-
-    @property
     def total_layers(self) -> int:
-        return len(self.kept_bottom) + len(self.top_kept)
+        return sum(len(region.layers) for region in self.regions)
 
 
 @dataclass
@@ -530,44 +598,80 @@ class _Spliced:
     body: list[str]
     footer: list[str]
     spans: list[tuple[int, int]]  # (index in body, output layer number)
-    seam_start: int
+    region_starts: list[int]  # index in body where each region begins
     net_e: float
 
 
 def _plan(
-    bottom: GcodeFile,
-    top: GcodeFile,
-    cut_z: float,
+    sources: dict[str, GcodeFile],
+    cut_zs: list[float],
     *,
-    bottom_role: str,
-    top_role: str,
+    first_role: str,
     start_flow: float | None,
     finish_flow: float | None,
 ) -> _Plan:
-    cut_layer = _snap(top, cut_z)
-    if cut_layer.index < 2:
-        raise WeldError(
-            f"cut Z={cut_z:.3f} lands on layer 1; at least one layer must come from "
-            f"{bottom.path.name}. Valid range is Z {top.layers[1].z:.3f} to "
-            f"{top.layers[-1].z:.3f}."
+    """Alternate between the two files at every cut, lowest first."""
+    roles = [first_role]
+    for _ in cut_zs:
+        roles.append("vase" if roles[-1] == "normal" else "normal")
+
+    cuts: list[Cut] = []
+    for requested, role in zip(sorted(cut_zs), roles[1:]):
+        layer = _snap(sources[role], requested)
+        cuts.append(Cut(requested=requested, z=layer.z, layer=layer.index))
+    for earlier, later in zip(cuts, cuts[1:]):
+        if later.z <= earlier.z + 1e-9:
+            raise WeldError(
+                f"cuts at Z={earlier.z:.3f} and Z={later.z:.3f} land on the same layer; "
+                "every weld needs at least one layer of its own."
+            )
+
+    regions: list[_Region] = []
+    warnings: list[str] = []
+    for position, role in enumerate(roles):
+        source = sources[role]
+        low = cuts[position - 1].z if position else None
+        high = cuts[position].z if position < len(cuts) else None
+        layers = [
+            layer
+            for layer in source.layers
+            if (low is None or layer.z >= low - 1e-9) and (high is None or layer.z < high - 1e-9)
+        ]
+        if not layers:
+            span = f"Z {low if low is not None else 0:.3f} to {high:.3f}" if high else "the top"
+            raise WeldError(
+                f"{source.path.name} has no layer for {span}; that leaves an empty section."
+            )
+        regions.append(
+            _Region(
+                source=source,
+                role=role,
+                layers=layers,
+                ramp_in=role == "vase" and position > 0,
+                ramp_out=role == "vase" and position < len(roles) - 1,
+            )
         )
-    kept_bottom = [layer for layer in bottom.layers if layer.z < cut_layer.z - 1e-9]
-    if not kept_bottom:
-        raise WeldError(
-            f"{bottom.path.name} has no layer below Z={cut_layer.z:.3f}; nothing to weld."
-        )
-    vase_config = top.config if top_role == "vase" else bottom.config
+        if position:
+            warnings += _seam_step_warning(source, layers[0], regions[position - 1].layers[-1])
+        if len(layers) == 1 and regions[-1].ramp_in and regions[-1].ramp_out:
+            regions[-1].ramp_out = False
+            warnings.append(
+                f"the vase section at Z={layers[0].z:.3f} is a single layer, so it ramps "
+                "flow up but not back down; move the cuts further apart"
+            )
+
+    vase = next((region.source for region in regions if region.role == "vase"), None)
+    vase_config = vase.config if vase else {}
     return _Plan(
-        cut_layer=cut_layer,
-        kept_bottom=kept_bottom,
-        top_kept=top.layers[cut_layer.index - 1 :],
+        regions=regions,
+        cuts=cuts,
         start_flow=start_flow
         if start_flow is not None
         else flow_ratio(vase_config, "spiral_starting_flow_ratio", DEFAULT_STARTING_FLOW_RATIO),
         finish_flow=finish_flow
         if finish_flow is not None
         else flow_ratio(vase_config, "spiral_finishing_flow_ratio", DEFAULT_FINISHING_FLOW_RATIO),
-        warnings=_seam_step_warning(top, cut_layer, kept_bottom[-1]),
+        warnings=warnings,
     )
 
 
@@ -588,88 +692,77 @@ def _seam_step_warning(top: GcodeFile, cut_layer: Layer, bottom_last: Layer) -> 
     ]
 
 
-def _splice(
-    bottom: GcodeFile,
-    top: GcodeFile,
-    plan: _Plan,
-    *,
-    bottom_role: str,
-    top_role: str,
-    seam_retract: bool,
-) -> _Spliced:
+def _splice(plan: _Plan, *, seam_retract: bool) -> _Spliced:
+    first = plan.regions[0]
     sink = _Sink()
     spans: list[tuple[int, int]] = []
-    cursor = Cursor(relative_e=bottom.relative_e)
-    sink.feed(bottom.lines[: bottom.header_end], cursor)
+    region_starts: list[int] = []
+    cursor = Cursor(relative_e=first.source.relative_e)
+    sink.feed(first.source.lines[: first.source.header_end], cursor)
     if not sink.saw_mode_command:
         sink.lines += ["M83 ; vaseweld: output uses relative E", "G92 E0"]
 
-    for layer in plan.kept_bottom:
-        lines = bottom.lines[layer.start : layer.end]
-        factors = (
-            _ramp_factors(lines, cursor, ramp_in=False, flow=plan.finish_flow)
-            if bottom_role == "vase" and layer is plan.bottom_last
-            else None
-        )
-        spans.append((len(sink.lines), len(spans) + 1))
-        sink.feed(lines, cursor, factors)
+    for position, region in enumerate(plan.regions):
+        opening = None
+        bridge = None
+        if position:
+            previous = plan.regions[position - 1]
+            sink.lines.append(
+                f"; vaseweld: weld boundary at Z={region.layers[0].z:.3f}, "
+                f"{previous.role} below / {region.role} above"
+            )
+            sink.lines.append("G92 E0")
+            seam = cursor.copy()
+            cursor = state_at(region.source, region.layers[0].start)
+            resume = cursor.copy()
+            # The travel goes to this file's own last position; the nozzle is still
+            # wherever the file below left it until then.
+            seam.x, seam.y = cursor.x, cursor.y
+            # A vase layer expects the nozzle to already be on its spiral, because in
+            # the source file the previous layer ended there. After a weld it is
+            # wherever the other file stopped, so the seam has to travel it back.
+            opening = _opening(region.source.layer_lines(region.layers[0]), cursor)
+            bridge = _seam_lines(region.source.config, seam, resume, opening, retract=seam_retract)
+            sink.append_generated(bridge.at_boundary, cursor)
 
-    seam_start = len(sink.lines)
-    sink.lines.append(
-        f"; vaseweld: weld boundary at Z={plan.cut_layer.z:.3f}, "
-        f"{bottom_role} below / {top_role} above"
-    )
-    sink.lines.append("G92 E0")
-    seam = cursor.copy()
-    cursor = state_at(top, plan.top_kept[0].start)
-    resume = cursor.copy()
-    # The travel goes to the top file's own last position; the nozzle is still
-    # wherever the bottom file left it until then.
-    seam.x, seam.y = cursor.x, cursor.y
+        region_starts.append(len(sink.lines))
+        last = len(region.layers) - 1
+        for offset, layer in enumerate(region.layers):
+            lines = region.source.layer_lines(layer)
+            spans.append((len(sink.lines), len(spans) + 1))
+            if offset == 0 and bridge and bridge.before_printing:
+                sink.feed(lines[: opening.printing_at], cursor)
+                sink.append_generated(bridge.before_printing, cursor)
+                lines = lines[opening.printing_at :]
+            factors = None
+            if region.ramp_in and offset == 0:
+                factors = _ramp_factors(lines, cursor, ramp_in=True, flow=plan.start_flow)
+            elif region.ramp_out and offset == last:
+                factors = _ramp_factors(lines, cursor, ramp_in=False, flow=plan.finish_flow)
+            sink.feed(lines, cursor, factors)
 
-    # A vase layer expects the nozzle to already be on its spiral, because in the
-    # source file the previous layer ended there. After a weld it is wherever the
-    # other file stopped, so the seam has to travel it back to that point.
-    opening = _opening(top.lines[plan.top_kept[0].start : plan.top_kept[0].end], cursor)
-    bridge = _seam_lines(top.config, seam, resume, opening, retract=seam_retract)
-    sink.append_generated(bridge.at_boundary, cursor)
-
-    for position, layer in enumerate(plan.top_kept):
-        lines = top.lines[layer.start : layer.end]
-        spans.append((len(sink.lines), len(spans) + 1))
-        if position == 0 and bridge.before_printing:
-            sink.feed(lines[: opening.printing_at], cursor)
-            sink.append_generated(bridge.before_printing, cursor)
-            lines = lines[opening.printing_at :]
-        factors = (
-            _ramp_factors(lines, cursor, ramp_in=True, flow=plan.start_flow)
-            if top_role == "vase" and position == 0
-            else None
-        )
-        sink.feed(lines, cursor, factors)
-
+    tail = plan.regions[-1].source
     footer_sink = _Sink()
-    footer_sink.feed(top.lines[top.footer_start :], cursor)
+    footer_sink.feed(tail.lines[tail.footer_start :], cursor)
     return _Spliced(
         body=sink.lines,
         footer=footer_sink.lines,
         spans=spans,
-        seam_start=seam_start,
+        region_starts=region_starts,
         net_e=sink.net_e + footer_sink.net_e,
     )
 
 
-def _finalise(
-    bottom: GcodeFile, top: GcodeFile, plan: _Plan, spliced: _Spliced
-) -> tuple[str, list[str]]:
+def _finalise(plan: _Plan, spliced: _Spliced) -> tuple[str, list[str]]:
     """Fix the counters, progress and totals that a splice invalidates.
 
     Returns a human-readable note and the list of things that had to be removed
     because they could not be recomputed.
     """
     body, footer = spliced.body, spliced.footer
+    first, last = plan.regions[0].source, plan.regions[-1].source
     removed: list[str] = []
-    progress = _build_progress(bottom, plan.bottom_last.end, top, plan.top_kept[0].start)
+    progress = _build_progress(plan.regions)
     _renumber_layers(body, footer, spliced.spans, plan.total_layers)
 
     if progress is None:
@@ -680,87 +773,87 @@ def _finalise(
         if before > len(body) + len(footer):
             removed.append("M73 progress reporting")
     else:
+        starts = spliced.region_starts
         for i, line in enumerate(body):
             if _M73.match(line):
-                body[i] = progress.rewrite(line, from_bottom=i < spliced.seam_start)
+                body[i] = progress.rewrite(line, max(0, bisect.bisect_right(starts, i) - 1))
         for i, line in enumerate(footer):
             if _M73.match(line):
-                footer[i] = progress.rewrite(line, from_bottom=False)
+                footer[i] = progress.rewrite(line, len(starts) - 1)
         note = "M73 progress remapped"
 
-    seconds = _welded_seconds(bottom, top, progress)
+    seconds = _welded_seconds(plan.regions, progress)
     stats = {
         "seconds": seconds,
         "first_layer_seconds": _time_comment_seconds(
-            bottom.lines, "estimated first layer printing time"
+            first.lines, "estimated first layer printing time"
         ),
-        "material": _material_totals(spliced.net_e, top.config),
+        "material": _material_totals(spliced.net_e, last.config),
     }
     _rewrite_stats(body, **stats)
     _rewrite_stats(footer, **stats)
     if seconds is None:
-        if _time_comment_seconds(top.lines, "estimated printing time") is not None:
+        if _time_comment_seconds(last.lines, "estimated printing time") is not None:
             removed.append("the printing time estimate")
         return note + ", time estimate stripped", removed
     return f"{note}, time estimate {_format_duration(seconds)}", removed
 
 
+def _ramp_notes(plan: _Plan) -> list[str]:
+    notes = []
+    for region in plan.regions:
+        if region.ramp_in:
+            notes.append(f"{plan.start_flow:.2f} -> 1.00 over layer {region.layers[0].index}")
+        if region.ramp_out:
+            notes.append(f"1.00 -> {plan.finish_flow:.2f} over layer {region.layers[-1].index}")
+    return notes
+
+
 def weld(
-    bottom: GcodeFile,
-    top: GcodeFile,
-    cut_z: float,
+    normal: GcodeFile,
+    vase: GcodeFile,
+    cut_z: float | list[float],
     *,
-    bottom_role: str,
-    top_role: str,
+    first_role: str = "normal",
     start_flow: float | None = None,
     finish_flow: float | None = None,
     seam_retract: bool = True,
 ) -> WeldResult:
-    """Weld ``bottom`` (below the cut) to ``top`` (at and above the cut)."""
+    """Alternate between the two slices at every cut height, lowest layer first.
+
+    One cut gives ``first_role`` below and the other file above. More cuts keep
+    alternating, so two cuts make a solid base, a vase body and a solid lid.
+    """
+    sources = {"normal": normal, "vase": vase}
+    cut_zs = [cut_z] if isinstance(cut_z, (int, float)) else list(cut_z)
+    if not cut_zs:
+        raise WeldError("no cut height given")
+
     plan = _plan(
-        bottom,
-        top,
-        cut_z,
-        bottom_role=bottom_role,
-        top_role=top_role,
+        sources,
+        cut_zs,
+        first_role=first_role,
         start_flow=start_flow,
         finish_flow=finish_flow,
     )
-    spliced = _splice(
-        bottom, top, plan, bottom_role=bottom_role, top_role=top_role, seam_retract=seam_retract
-    )
-    stats_note, stats_removed = _finalise(bottom, top, plan, spliced)
+    spliced = _splice(plan, seam_retract=seam_retract)
+    stats_note, stats_removed = _finalise(plan, spliced)
 
-    cut_layer, kept_bottom, top_kept = plan.cut_layer, plan.kept_bottom, plan.top_kept
-    bottom_last = plan.bottom_last
-    banner = _provenance(
-        bottom=bottom,
-        top=top,
-        bottom_role=bottom_role,
-        top_role=top_role,
-        cut_layer=cut_layer,
-        kept_bottom=kept_bottom,
-        top_kept=top_kept,
-    )
     body = spliced.body
     return WeldResult(
-        lines=body[:1] + banner + body[1:] + spliced.footer,
-        newline=bottom.newline,
-        cut_z=cut_layer.z,
-        requested_z=cut_z,
-        cut_layer=cut_layer.index,
-        bottom_role=bottom_role,
-        top_role=top_role,
-        bottom_range=(kept_bottom[0].index, bottom_last.index),
-        top_range=(top_kept[0].index, top_kept[-1].index),
-        bottom_z=(kept_bottom[0].z, bottom_last.z),
-        top_z=(top_kept[0].z, top_kept[-1].z),
-        e_mode_note=_e_mode_note(bottom, top),
-        ramp_note=(
-            f"{plan.start_flow:.2f} -> 1.00 over layer {cut_layer.index}"
-            if top_role == "vase"
-            else f"1.00 -> {plan.finish_flow:.2f} over layer {bottom_last.index}"
-        ),
+        lines=body[:1] + _provenance(plan) + body[1:] + spliced.footer,
+        newline=plan.regions[0].source.newline,
+        cuts=plan.cuts,
+        slabs=[
+            Slab(
+                role=region.role,
+                layers=(region.layers[0].index, region.layers[-1].index),
+                z=(region.layers[0].z, region.layers[-1].z),
+            )
+            for region in plan.regions
+        ],
+        e_mode_note=_e_mode_note(normal, vase),
+        ramps=_ramp_notes(plan),
         stats_note=stats_note,
         stats_removed=stats_removed,
         warnings=plan.warnings,

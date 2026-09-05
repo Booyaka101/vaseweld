@@ -19,9 +19,9 @@ docker run --rm -v "$PWD/sim:/work" klipper-batch bash /work/run.sh
 python sim/analyse.py
 ```
 
-`build_cases.py` writes five files per extruder mode from the committed fixtures: the two slicer
-originals, the splice you get by pasting the two files together in a text editor, and vaseweld's
-weld in both directions.
+`build_cases.py` writes six files per extruder mode from the committed fixtures: the two slicer
+originals, the splice you get by pasting the two files together in a text editor, vaseweld's weld in
+both directions, and a two-cut weld with a solid base, a vase body and a solid lid.
 
 ## What it found
 
@@ -39,6 +39,8 @@ PASS  3_absolute_vaseweld                print time 299.385s
 PASS  3_relative_vaseweld                print time 299.512s
 PASS  4_absolute_vaseweld_vase_first     print time 371.931s
 PASS  4_relative_vaseweld_vase_first     print time 371.931s
+PASS  5_absolute_vaseweld_two_cuts       print time 355.730s
+PASS  5_relative_vaseweld_two_cuts       print time 355.730s
 ```
 
 Three things worth pulling out.

@@ -88,6 +88,33 @@ cut snapped to Z=12.400 (layer 62)
 ...
 ```
 
+Repeat `--at` to alternate again. Two cuts give the shape people actually ask for, a solid base, a
+vase body and a solid lid:
+
+```
+$ vaseweld weld --normal base.gcode --vase body.gcode --at 12.4 --at 30 -o hybrid.gcode
+cuts snapped to Z=12.400 (layer 62), Z=30.000 (layer 150)
+normal: layers 1-61 (Z 0.200-12.200)
+vase: layers 62-149 (Z 12.400-29.800)
+normal: layers 150-200 (Z 30.000-40.000)
+E mode: absolute -> relative (converted)
+transition ramp: 0.80 -> 1.00 over layer 62
+transition ramp: 1.00 -> 0.25 over layer 149
+wrote hybrid.gcode (34498 lines)
+```
+
+Every seam gets its own travel, retraction match and flow ramp, so the spiral ramps up where it
+starts and back down where it ends.
+
+If you would rather not guess at the cut height, ask:
+
+```
+$ vaseweld layers body.gcode
+prusaslicer_vase_40mm.gcode: 200 layers, Z 0.200 to 40.000
+layer height: 0.200 mm
+weldable range: Z 0.400 to 40.000 (layers 2 to 200)
+```
+
 `--vase-first` inverts the order, for a vase body with a solid lid on top:
 
 ```
@@ -246,9 +273,9 @@ FAIL: 1 problem in broken.gcode
 ```
 --normal PATH          the non-vase slice
 --vase PATH            the spiral vase slice
---at Z                 cut height in mm, snapped down to a real layer
+--at Z                 cut height in mm, snapped down to a real layer; repeat to alternate again
 -o, --output PATH      file to write
---vase-first           vase below the cut, normal above it
+--vase-first           start with the vase part below the first cut
 --start-flow RATIO     override spiral_starting_flow_ratio (0 to 1)
 --finish-flow RATIO    override spiral_finishing_flow_ratio (0 to 1)
 --no-seam-retract      do not retract before the seam travel
@@ -261,7 +288,6 @@ FAIL: 1 problem in broken.gcode
 
 These are out of scope for 1.0, not bugs:
 
-- One weld point per run. Weld twice if you want a solid base and a solid lid.
 - Text G-code only. Binary `.bgcode` is refused with the setting to change.
 - Single object, single material. This is the same constraint PrusaSlicer's own validator enforces,
   and vaseweld quotes it back at you: "The Spiral Vase option can only be used when printing single
@@ -281,7 +307,7 @@ cd vaseweld
 python -m pytest
 ```
 
-117 tests, about 32 seconds, no dependencies beyond pytest. Everything runs against real slicer
+128 tests, about 36 seconds, no dependencies beyond pytest. Everything runs against real slicer
 output committed under `tests/fixtures/`, produced by driving PrusaSlicer 2.9.6, OrcaSlicer 2.4.2
 and BambuStudio 02.08.02.61 from the command line over the models in `examples/`. See
 [tests/fixtures/README.md](tests/fixtures/README.md) for the exact commands.

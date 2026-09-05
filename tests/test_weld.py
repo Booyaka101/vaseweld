@@ -44,7 +44,7 @@ def output_extrusion(lines):
 
 @pytest.fixture(scope="module")
 def welded(ps_normal, ps_vase):
-    return weld(ps_normal, ps_vase, CUT_Z, bottom_role="normal", top_role="vase")
+    return weld(ps_normal, ps_vase, CUT_Z)
 
 
 def test_layer_membership_either_side_of_the_cut(welded):
@@ -78,20 +78,20 @@ def test_output_is_relative_e_throughout(welded):
     [(12.4, 12.4, 62), (12.5, 12.4, 62), (12.39, 12.2, 61), (0.4, 0.4, 2), (40.0, 40.0, 200)],
 )
 def test_cut_snaps_down_to_a_real_layer(ps_normal, ps_vase, requested, expected_z, expected_layer):
-    result = weld(ps_normal, ps_vase, requested, bottom_role="normal", top_role="vase")
+    result = weld(ps_normal, ps_vase, requested)
     assert result.cut_z == pytest.approx(expected_z)
     assert result.cut_layer == expected_layer
 
 
 def test_snapping_is_reported_when_it_happens(ps_normal, ps_vase):
-    result = weld(ps_normal, ps_vase, 12.5, bottom_role="normal", top_role="vase")
+    result = weld(ps_normal, ps_vase, 12.5)
     assert result.summary()[0] == "requested Z=12.500 is between layers, snapping down"
 
 
 @pytest.mark.parametrize("cut", [0.2, 0.35, 40.2, -1.0])
 def test_cut_outside_the_range_names_the_range(ps_normal, ps_vase, cut):
     with pytest.raises(WeldError) as excinfo:
-        weld(ps_normal, ps_vase, cut, bottom_role="normal", top_role="vase")
+        weld(ps_normal, ps_vase, cut)
     message = str(excinfo.value)
     assert "0.400" in message and "40.000" in message
 
@@ -107,8 +107,6 @@ def test_absolute_to_relative_round_trips_to_the_same_extrusion(ps_normal, ps_va
         ps_normal,
         ps_vase,
         CUT_Z,
-        bottom_role="normal",
-        top_role="vase",
         start_flow=1.0,
         seam_retract=False,
     )
@@ -165,8 +163,6 @@ def test_ramp_scales_the_transition_layer_exactly(ps_normal, ps_vase, flow):
         ps_normal,
         ps_vase,
         CUT_Z,
-        bottom_role="normal",
-        top_role="vase",
         start_flow=flow,
         seam_retract=False,
     )
@@ -200,7 +196,7 @@ def test_ramp_scales_the_transition_layer_exactly(ps_normal, ps_vase, flow):
 
 
 def test_vase_first_ramps_the_last_vase_layer_down(ps_normal, ps_vase):
-    result = weld(ps_vase, ps_normal, CUT_Z, bottom_role="vase", top_role="normal")
+    result = weld(ps_normal, ps_vase, CUT_Z, first_role="vase")
     assert result.summary()[1] == "vase: layers 1-61 (Z 0.200-12.200)"
     assert result.summary()[2] == "normal: layers 62-200 (Z 12.400-40.000)"
     assert result.summary()[4] == "transition ramp: 1.00 -> 0.25 over layer 61"
@@ -208,7 +204,7 @@ def test_vase_first_ramps_the_last_vase_layer_down(ps_normal, ps_vase):
 
 def test_arc_moves_pass_through_untouched(small_vase):
     arcs = parse_file(fixture("arcfit_normal_6mm.gcode"))
-    result = weld(arcs, small_vase, 3.0, bottom_role="normal", top_role="vase")
+    result = weld(arcs, small_vase, 3.0)
     source = {
         line.split("E")[0].strip()
         for line in arcs.lines[: arcs.layers[13].end]
@@ -222,7 +218,7 @@ def test_arc_moves_pass_through_untouched(small_vase):
 
 
 def test_klipper_layer_markers_are_rewritten(klipper_normal, klipper_vase):
-    result = weld(klipper_normal, klipper_vase, 3.0, bottom_role="normal", top_role="vase")
+    result = weld(klipper_normal, klipper_vase, 3.0)
     totals = [line for line in result.lines if "TOTAL_LAYER" in line and line.startswith("SET_")]
     assert totals == ["SET_PRINT_STATS_INFO TOTAL_LAYER=30"]
     currents = [
@@ -235,7 +231,7 @@ def test_klipper_layer_markers_are_rewritten(klipper_normal, klipper_vase):
 
 
 def test_orca_progress_and_material_are_recomputed(orca_normal, orca_vase):
-    result = weld(orca_normal, orca_vase, CUT_Z, bottom_role="normal", top_role="vase")
+    result = weld(orca_normal, orca_vase, CUT_Z)
     assert "M73 progress remapped" in result.stats_note
     starts = [line for line in result.lines if line.startswith("M73")][0]
     assert starts.startswith("M73 P0 R")
@@ -262,20 +258,20 @@ def test_provenance_banner_names_both_inputs(welded):
 
 
 def test_seam_retract_is_added_only_when_the_layer_lacks_one(ps_normal, ps_vase):
-    forward = weld(ps_normal, ps_vase, CUT_Z, bottom_role="normal", top_role="vase")
+    forward = weld(ps_normal, ps_vase, CUT_Z)
     assert [line.split(SEAM)[1].strip() for line in bridge_lines(forward)] == [
         "retract",
         "travel to where the next slice expects the nozzle",
         "unretract",
     ]
     # The normal slice retracts and travels at every layer change, so the seam needs nothing.
-    backward = weld(ps_vase, ps_normal, CUT_Z, bottom_role="vase", top_role="normal")
+    backward = weld(ps_normal, ps_vase, CUT_Z, first_role="vase")
     assert bridge_lines(backward) == []
 
 
 def test_removals_are_reported_only_when_something_was_removed(welded, orca_normal, orca_vase):
     assert welded.stats_removed == ["the printing time estimate"]
-    orca = weld(orca_normal, orca_vase, CUT_Z, bottom_role="normal", top_role="vase")
+    orca = weld(orca_normal, orca_vase, CUT_Z)
     assert orca.stats_removed == []
 
 
@@ -302,9 +298,7 @@ def test_every_weld_survives_check(request, tmp_path, slicer, direction, cut):
     vase = request.getfixturevalue(
         {"prusa": "ps_vase", "orca": "orca_vase", "bambu": "bambu_vase"}[slicer]
     )
-    bottom, top = (normal, vase) if direction == "normal-first" else (vase, normal)
-    roles = ("normal", "vase") if direction == "normal-first" else ("vase", "normal")
-    result = weld(bottom, top, cut, bottom_role=roles[0], top_role=roles[1])
+    result = weld(normal, vase, cut, first_role=direction.removesuffix("-first"))
 
     path = tmp_path / "welded.gcode"
     path.write_text(
@@ -316,7 +310,7 @@ def test_every_weld_survives_check(request, tmp_path, slicer, direction, cut):
 
 def test_seam_correction_precedes_the_layer_that_primes_itself(bambu_normal, bambu_vase):
     """BambuStudio's normal layers unretract themselves, so the fix has to come first."""
-    result = weld(bambu_vase, bambu_normal, CUT_Z, bottom_role="vase", top_role="normal")
+    result = weld(bambu_normal, bambu_vase, CUT_Z, first_role="vase")
     boundary = next(i for i, line in enumerate(result.lines) if "weld boundary" in line)
     window = result.lines[boundary : boundary + 12]
     correction = next(i for i, line in enumerate(window) if SEAM in line)
@@ -335,22 +329,22 @@ def test_seam_matches_the_retraction_state_each_slicer_leaves(
     )
     assert state_at(ps_normal, ps_normal.layers[60].end).retracted == pytest.approx(0.0, abs=1e-6)
 
-    bambu = weld(bambu_normal, bambu_vase, CUT_Z, bottom_role="normal", top_role="vase")
+    bambu = weld(bambu_normal, bambu_vase, CUT_Z)
     seam = [line.split(SEAM)[1].strip() for line in bridge_lines(bambu)]
     assert seam == ["travel to where the next slice expects the nozzle", "unretract"]
 
-    prusa = weld(ps_normal, ps_vase, CUT_Z, bottom_role="normal", top_role="vase")
+    prusa = weld(ps_normal, ps_vase, CUT_Z)
     seam = [line.split(SEAM)[1].strip() for line in bridge_lines(prusa)]
     assert seam == ["retract", "travel to where the next slice expects the nozzle", "unretract"]
 
 
 def test_bambu_vase_first_corrects_the_retraction_the_other_way(bambu_normal, bambu_vase):
-    result = weld(bambu_vase, bambu_normal, CUT_Z, bottom_role="vase", top_role="normal")
+    result = weld(bambu_normal, bambu_vase, CUT_Z, first_role="vase")
     assert [line.split(SEAM)[1].strip() for line in bridge_lines(result)] == ["retract"]
 
 
 def test_bambustudio_header_totals_are_recomputed(bambu_normal, bambu_vase):
-    result = weld(bambu_normal, bambu_vase, CUT_Z, bottom_role="normal", top_role="vase")
+    result = weld(bambu_normal, bambu_vase, CUT_Z)
     header = {
         line.split(":", 1)[0].strip(" ;"): line.split(":", 1)[1].strip()
         for line in result.lines[:20]
@@ -376,7 +370,7 @@ def test_crlf_input_round_trips_to_crlf_output(tmp_path, small_normal, small_vas
         pair.append(parse_file(path))
     assert pair[0].newline == "\r\n"
 
-    result = weld(pair[0], pair[1], 3.0, bottom_role="normal", top_role="vase")
+    result = weld(pair[0], pair[1], 3.0)
     out = tmp_path / "out.gcode"
     out.write_text(result.newline.join(result.lines) + result.newline, encoding="utf-8", newline="")
     raw = out.read_bytes()
@@ -387,7 +381,7 @@ def test_crlf_input_round_trips_to_crlf_output(tmp_path, small_normal, small_vas
 def test_forced_weld_warns_when_the_seam_step_is_wrong(small_normal):
     """--force can squeeze a thick layer into a thin gap; say so rather than stay quiet."""
     thick = parse_file(fixture("mismatch_layerheight_6mm.gcode"))
-    result = weld(small_normal, thick, 3.0, bottom_role="normal", top_role="vase")
+    result = weld(small_normal, thick, 3.0)
     assert len(result.warnings) == 1
     assert "0.200 mm step" in result.warnings[0]
     assert "0.300 mm layers" in result.warnings[0]
@@ -467,7 +461,7 @@ def test_the_weld_layer_lays_a_proper_bead(request, tmp_path, slicer):
     where the slice above expects the nozzle.
     """
     normal, vase = slices_for(request, slicer)
-    result = weld(normal, vase, CUT_Z, bottom_role="normal", top_role="vase")
+    result = weld(normal, vase, CUT_Z)
     bad = malformed_lines(reparse(result, tmp_path), CUT_LAYER)
     assert not bad, f"{slicer}: malformed beads at the weld layer: {bad}"
 
@@ -496,3 +490,69 @@ def test_the_guard_catches_a_hand_splice(request, tmp_path, slicer, mode):
     # A spiral segment is about 0.5 mm; these run across the open part.
     assert length > 3.0
     assert width < 0.1 if mode == "relative" else width > 5.0
+
+
+# --- more than one weld point -------------------------------------------------
+
+SECOND_CUT_Z = 30.0
+SECOND_CUT_LAYER = 150
+
+
+@pytest.fixture(scope="module")
+def sandwiched(ps_normal, ps_vase):
+    """Solid base, vase body, solid lid: the shape the slicer issues keep asking for."""
+    return weld(ps_normal, ps_vase, [CUT_Z, SECOND_CUT_Z])
+
+
+def test_two_cuts_make_three_slabs(sandwiched):
+    assert [slab.role for slab in sandwiched.slabs] == ["normal", "vase", "normal"]
+    assert [slab.layers for slab in sandwiched.slabs] == [(1, 61), (62, 149), (150, 200)]
+    assert sandwiched.slabs[1].z == (pytest.approx(12.4), pytest.approx(29.8))
+    assert [cut.layer for cut in sandwiched.cuts] == [CUT_LAYER, SECOND_CUT_LAYER]
+
+
+def test_two_cuts_ramp_in_and_back_out(sandwiched):
+    assert sandwiched.ramps == [
+        "0.80 -> 1.00 over layer 62",
+        "1.00 -> 0.25 over layer 149",
+    ]
+    assert sandwiched.summary()[:4] == [
+        "cuts snapped to Z=12.400 (layer 62), Z=30.000 (layer 150)",
+        "normal: layers 1-61 (Z 0.200-12.200)",
+        "vase: layers 62-149 (Z 12.400-29.800)",
+        "normal: layers 150-200 (Z 30.000-40.000)",
+    ]
+
+
+def test_two_cuts_survive_check_and_lay_proper_beads(sandwiched, tmp_path):
+    from vaseweld.validate import check
+
+    welded = reparse(sandwiched, tmp_path)
+    report = check(welded.path)
+    assert report.ok, " | ".join([report.summary()] + [str(p) for p in report.problems])
+    for layer in (CUT_LAYER, SECOND_CUT_LAYER):
+        assert not malformed_lines(welded, layer), f"bad beads at layer {layer}"
+
+
+def test_cuts_are_sorted_however_they_arrive(ps_normal, ps_vase, sandwiched):
+    shuffled = weld(ps_normal, ps_vase, [SECOND_CUT_Z, CUT_Z])
+    assert shuffled.summary() == sandwiched.summary()
+
+
+def test_two_cuts_on_the_same_layer_are_refused(ps_normal, ps_vase):
+    with pytest.raises(WeldError, match="same layer"):
+        weld(ps_normal, ps_vase, [12.4, 12.45])
+
+
+def test_a_one_layer_vase_section_says_so(ps_normal, ps_vase):
+    result = weld(ps_normal, ps_vase, [12.4, 12.6])
+    assert result.slabs[1].layers == (62, 62)
+    assert result.ramps == ["0.80 -> 1.00 over layer 62"]
+    assert any("single layer" in warning for warning in result.warnings)
+
+
+def test_provenance_names_every_slab(sandwiched):
+    banner = "\n".join(sandwiched.lines[:8])
+    assert "Z=12.400 (layer 62), Z=30.000 (layer 150)" in banner
+    assert banner.count("prusaslicer_normal_40mm.gcode (normal)") == 2
+    assert "prusaslicer_vase_40mm.gcode (vase)" in banner

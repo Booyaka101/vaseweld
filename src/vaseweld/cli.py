@@ -19,8 +19,13 @@ EXIT_USAGE = 2
 
 _EPILOG = r"""Slice the same plate twice, once with Spiral Vase off and once on, then:
 
+  vaseweld layers body.gcode
   vaseweld weld --normal base.gcode --vase body.gcode --at 12.4 -o out.gcode
   vaseweld check out.gcode
+
+Repeat --at to alternate again, so a solid base, a vase body and a solid lid is:
+
+  vaseweld weld --normal base.gcode --vase body.gcode --at 12.4 --at 30 -o out.gcode
 
 The output always uses relative extrusion (M83). Absolute-E inputs are converted.
 
@@ -48,7 +53,15 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     weld_cmd.add_argument("--normal", type=Path, help="the non-vase slice")
     weld_cmd.add_argument("--vase", type=Path, help="the spiral vase slice")
-    weld_cmd.add_argument("--at", required=True, type=float, metavar="Z", help="cut height in mm")
+    weld_cmd.add_argument(
+        "--at",
+        required=True,
+        type=float,
+        metavar="Z",
+        action="append",
+        help="cut height in mm; repeat it to alternate again, so two cuts give a "
+        "solid base, a vase body and a solid lid",
+    )
     weld_cmd.add_argument("-o", "--output", type=Path, help="file to write")
     weld_cmd.add_argument(
         "gcode",
@@ -60,7 +73,7 @@ def _build_parser() -> argparse.ArgumentParser:
     weld_cmd.add_argument(
         "--vase-first",
         action="store_true",
-        help="print the vase part below the cut and the normal part above it",
+        help="start with the vase part below the first cut instead of the normal part",
     )
     weld_cmd.add_argument(
         "--start-flow",
@@ -90,6 +103,16 @@ def _build_parser() -> argparse.ArgumentParser:
         "--force",
         action="store_true",
         help="weld even if the two files disagree on printer or plate settings",
+    )
+
+    layers_cmd = sub.add_parser(
+        "layers",
+        help="list the layer heights a file can be cut at",
+        description="Report the Z ladder, so you can pick a cut without guessing.",
+    )
+    layers_cmd.add_argument("file", type=Path, help="G-code file to inspect")
+    layers_cmd.add_argument(
+        "--all", action="store_true", help="print every layer, not just the summary"
     )
 
     check_cmd = sub.add_parser(
@@ -145,14 +168,11 @@ def _run_weld(args: argparse.Namespace, out: "object") -> int:
         print(f"warning: {exc}", file=sys.stderr)
         print("warning: continuing because --force was given", file=sys.stderr)
 
-    bottom, top = (vase, normal) if args.vase_first else (normal, vase)
-    roles = ("vase", "normal") if args.vase_first else ("normal", "vase")
     result = weld(
-        bottom,
-        top,
+        normal,
+        vase,
         args.at,
-        bottom_role=roles[0],
-        top_role=roles[1],
+        first_role="vase" if args.vase_first else "normal",
         start_flow=args.start_flow,
         finish_flow=args.finish_flow,
         seam_retract=not args.no_seam_retract,
@@ -184,6 +204,29 @@ def _run_weld(args: argparse.Namespace, out: "object") -> int:
     return EXIT_OK
 
 
+def _run_layers(args: argparse.Namespace, out: "object") -> int:
+    gcode = parse_file(args.file)
+    zs = [layer.z for layer in gcode.layers]
+    steps = {round(b - a, 4) for a, b in zip(zs, zs[1:])}
+    print(f"{gcode.path.name}: {len(zs)} layers, Z {zs[0]:.3f} to {zs[-1]:.3f}", file=out)
+    if len(steps) == 1:
+        print(f"layer height: {next(iter(steps)):.3f} mm", file=out)
+    else:
+        print(
+            f"layer height: varies, {min(steps):.3f} to {max(steps):.3f} mm. "
+            "Slice both files at a fixed layer height before welding.",
+            file=out,
+        )
+    print(
+        f"weldable range: Z {zs[1]:.3f} to {zs[-1]:.3f} (layers 2 to {len(zs)})",
+        file=out,
+    )
+    if args.all:
+        for layer in gcode.layers:
+            print(f"  layer {layer.index:4d}  Z {layer.z:.3f}", file=out)
+    return EXIT_OK
+
+
 def _run_check(args: argparse.Namespace, out: "object") -> int:
     report = run_check(args.file)
     print(report.summary(), file=out)
@@ -198,6 +241,8 @@ def main(argv: list[str] | None = None, out: "object" = None) -> int:
     try:
         if args.command == "weld":
             return _run_weld(args, out)
+        if args.command == "layers":
+            return _run_layers(args, out)
         return _run_check(args, out)
     except (GcodeError, CompatError, WeldError) as exc:
         print(f"vaseweld: {exc}", file=sys.stderr)
