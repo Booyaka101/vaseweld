@@ -89,7 +89,7 @@ green against PrusaSlicer alone.
 
 ## Shipping steps for the owner
 
-1. Push the two local commits to a public `Booyaka101/vaseweld`.
+1. Push local `main` to a public `Booyaka101/vaseweld`.
 2. Print the hybrid, photograph it, replace `docs/weld-preview.png` as the lead image (keep the
    render lower down, it explains the mechanism).
 3. `python -m build && python -m twine upload dist/*` for PyPI.
@@ -100,10 +100,11 @@ green against PrusaSlicer alone.
 5. Enable GitHub Pages (Settings > Pages > source: GitHub Actions). `pages.yml` then publishes the
    demo on every push to `main`, and the README can link it.
 6. Best first distribution step: comment on
-   [PrusaSlicer #3204](https://github.com/prusa3d/PrusaSlicer/issues/3204). Six years of `+1`, and
-   the thread's own regulars have twice asked people to stop posting `+1` and post something
-   substantive. A working tool with a photo is that. The r/3Dprinting and r/prusa3d posts come after,
-   with the print in hand.
+   [PrusaSlicer #3204](https://github.com/prusa3d/PrusaSlicer/issues/3204). Six years of `+1`, the
+   bot has just labelled it legacy and threatened to auto-close it, and the thread's own regulars
+   have twice asked people to stop posting `+1` and post something substantive. A working tool is
+   that. A draft comment is ready; it needs the repo and Pages URLs filled in and your go before it
+   is posted. The r/3Dprinting and r/prusa3d posts come after, with a print in hand.
 
 ## Added in 1.1.0
 
