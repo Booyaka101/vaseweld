@@ -396,3 +396,103 @@ def test_forced_weld_warns_when_the_seam_step_is_wrong(small_normal):
 
 def test_a_matched_weld_warns_about_nothing(welded):
     assert welded.warnings == []
+
+
+def bead_widths(gcode, layer_index, *, layer_height=0.2, filament=1.75):
+    """(length, bead width) for every extruding move of one layer.
+
+    Same rectangle-with-round-ends model sim/deposit.py uses, in the standard
+    library so the regression guard costs nothing to run.
+    """
+    import math
+
+    from vaseweld.parser import walk
+
+    layer = gcode.layers[layer_index - 1]
+    area_of_filament = math.pi * (filament / 2.0) ** 2
+    cursor = state_at(gcode, layer.start)
+    out = []
+    for step in walk(gcode.lines[layer.start : layer.end], cursor):
+        if step.kind != "move" or not step.delta or step.delta <= 0 or step.dist <= 0:
+            continue
+        area = step.delta * area_of_filament / step.dist
+        width = (area + layer_height**2 * (1 - math.pi / 4)) / layer_height
+        out.append((step.dist, width))
+    return out
+
+
+def reparse(result, tmp_path):
+    """Round-trip a WeldResult through a file so it can be measured as shipped."""
+    path = tmp_path / "welded.gcode"
+    path.write_text(
+        result.newline.join(result.lines) + result.newline, encoding="utf-8", newline=""
+    )
+    return parse_file(path)
+
+
+def malformed_lines(gcode, layer_index):
+    """Long moves whose bead is nowhere near the layer's own nominal width.
+
+    A hand splice produces one or the other depending on the extruder mode: a
+    starved thread dragged across the part when the file is relative E, and a
+    gorged blob when it is absolute E and the values are read as positions.
+    """
+    import statistics
+
+    widths = bead_widths(gcode, layer_index)
+    nominal = statistics.median(width for _, width in widths)
+    return [
+        (length, width)
+        for length, width in widths
+        if length > 1.0 and not 0.5 * nominal <= width <= 2.0 * nominal
+    ]
+
+
+def slices_for(request, slicer):
+    return (
+        request.getfixturevalue(
+            {"prusa": "ps_normal", "orca": "orca_normal", "bambu": "bambu_normal"}[slicer]
+        ),
+        request.getfixturevalue(
+            {"prusa": "ps_vase", "orca": "orca_vase", "bambu": "bambu_vase"}[slicer]
+        ),
+    )
+
+
+@pytest.mark.parametrize("slicer", ["prusa", "orca", "bambu"])
+def test_the_weld_layer_lays_a_proper_bead(request, tmp_path, slicer):
+    """Every printing move at the weld has to be a wall, not a thread or a blob.
+
+    Measured on the welded output, so it fails if the seam ever stops travelling to
+    where the slice above expects the nozzle.
+    """
+    normal, vase = slices_for(request, slicer)
+    result = weld(normal, vase, CUT_Z, bottom_role="normal", top_role="vase")
+    bad = malformed_lines(reparse(result, tmp_path), CUT_LAYER)
+    assert not bad, f"{slicer}: malformed beads at the weld layer: {bad}"
+
+
+@pytest.mark.parametrize(
+    "slicer, mode", [("prusa", "absolute"), ("orca", "relative"), ("bambu", "relative")]
+)
+def test_the_guard_catches_a_hand_splice(request, tmp_path, slicer, mode):
+    """Prove the check above can fail, using the splice people do in a text editor.
+
+    The defect takes two shapes: a starved thread dragged across the part when the
+    files are relative E, and a blob when they are absolute and every E value after
+    the paste is read as a position.
+    """
+    normal, vase = slices_for(request, slicer)
+    naive = (
+        normal.lines[: normal.layers[CUT_LAYER - 1].start]
+        + vase.lines[vase.layers[CUT_LAYER - 1].start :]
+    )
+    path = tmp_path / "naive.gcode"
+    path.write_text("\n".join(naive) + "\n", encoding="utf-8", newline="")
+
+    bad = malformed_lines(parse_file(path), CUT_LAYER)
+    assert bad, f"{slicer}: the hand splice should be caught and is not"
+    length, width = max(bad, key=lambda pair: pair[0])
+    # A spiral segment is about 0.5 mm; these run across the open part.
+    assert length > 3.0
+    assert width < 0.1 if mode == "relative" else width > 5.0

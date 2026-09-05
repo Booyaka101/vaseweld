@@ -198,7 +198,29 @@ somewhere else:
 | hand splice, relative E | 12.522 mm | 0.01694 mm | 4% |
 | vaseweld, either | 0.500 mm | 0.01359 mm | 80.2% |
 
-That 80.2% is the transition ramp starting from `--start-flow 0.8`. See [sim/README.md](sim/README.md).
+That 80.2% is the transition ramp starting from `--start-flow 0.8`.
+
+`sim/deposit.py` takes it the rest of the way: it turns every extruding move into a bead of known
+width and draws the weld layer from above, so you can see what the two files put on the plate.
+
+![The weld layer seen from above: the hand splice drags a thread across the part, vaseweld's is a clean loop](docs/weld-layer.png)
+
+The red line is a real extrusion, 0.06 mm wide, laid straight across the open middle of the vase.
+That is what a hand splice does at the seam, because the nozzle is still where the other file left
+it. The same model sawn through the wall:
+
+![Section through the wall at the weld](docs/seam-section.png)
+
+Bead widths at the weld layer, against a 0.450 mm nominal:
+
+| | hand splice | vaseweld |
+| --- | --- | --- |
+| the wall | 0.450 mm, no ramp | 0.425 mm, the ramp starting at 80% |
+| across the part | 0.059 mm thread | nothing |
+
+`tests/test_weld.py` carries this as a regression guard: no printing move at the weld layer may lay
+a bead outside half to twice the layer's own nominal width, checked for all three slicers, with a
+companion test that the same measurement does catch a hand splice. See [sim/README.md](sim/README.md).
 
 ## check
 
@@ -259,7 +281,7 @@ cd vaseweld
 python -m pytest
 ```
 
-111 tests, about 30 seconds, no dependencies beyond pytest. Everything runs against real slicer
+117 tests, about 32 seconds, no dependencies beyond pytest. Everything runs against real slicer
 output committed under `tests/fixtures/`, produced by driving PrusaSlicer 2.9.6, OrcaSlicer 2.4.2
 and BambuStudio 02.08.02.61 from the command line over the models in `examples/`. See
 [tests/fixtures/README.md](tests/fixtures/README.md) for the exact commands.

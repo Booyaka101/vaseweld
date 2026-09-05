@@ -78,6 +78,47 @@ the blob klippy refuses. vaseweld retracts, travels there, unretracts, so its fi
 0.5 mm long at 80.2% flow. That 80.2% is the flow ramp starting from `--start-flow 0.8`, which is
 the ramp doing exactly what it says on the tin.
 
+## Where the plastic actually lands
+
+klippy models motion, not material. `deposit.py` does the other half: it turns every extruding move
+into a bead, using the usual rectangle-with-round-ends model, so an extrusion of cross-section A at
+layer height h comes out w wide, where `A = h*w - h^2 + pi*h^2/4`.
+
+```sh
+python sim/deposit.py sim/gcode/3_relative_vaseweld.gcode --at 3.0 --cut-layer 15
+```
+
+```
+   layer   median bead width   beads
+      13            0.450 mm       5
+      14            0.450 mm       5
+      15            0.425 mm       1  <- weld
+      16            0.450 mm       1
+```
+
+The 0.450 mm it computes for the ordinary layers is exactly the `perimeters extrusion width = 0.45mm`
+the slicer wrote in its own header, which is the check that the bead model is right. The weld layer
+comes out at 0.425 mm because the flow ramp starts at 80%.
+
+The same run on the hand splice finds two beads at the weld layer instead of one:
+
+```
+    radius 6.603 mm   width 0.059 mm     <- dragged across the open part
+    radius 7.774 mm   width 0.450 mm
+```
+
+`--plan` draws that layer from above and `--compare` puts two files side by side:
+
+```sh
+python sim/deposit.py sim/gcode/2_relative_naive_text_editor.gcode \
+  --compare sim/gcode/3_relative_vaseweld.gcode \
+  --at 3.0 --cut-layer 15 --plan -o docs/weld-layer.png
+```
+
+`deposit.py` needs numpy and pillow. It is a development tool, not part of the package, and the
+measurement it makes is duplicated in the test suite in the standard library so the guard runs
+everywhere.
+
 ## The simulated printer
 
 `printer.cfg` is a plain cartesian printer with a 200x200 bed, one extruder, 1.75 mm filament and a
