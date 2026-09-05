@@ -160,6 +160,13 @@ def _resolve_inputs(args: argparse.Namespace) -> tuple[Path, Path, Path]:
         )
     if output is None:
         raise WeldError("no destination: pass -o/--output")
+    if output.suffix.lower() == ".bgcode":
+        raise WeldError(
+            f"{output}: vaseweld reads binary G-code but cannot write it. "
+            "Give -o a .gcode name, or turn off 'Supports binary G-code' in "
+            "Print Settings > Output options on the profile that runs this hook. "
+            "Printers that take .bgcode take plain G-code too."
+        )
     return normal, vase, output
 
 

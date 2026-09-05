@@ -12,7 +12,8 @@ import re
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 
-BGCODE_MAGIC = b"GCDE"
+from .bgcode import BgcodeError, decode, is_bgcode
+
 
 _LAYER_CHANGE = re.compile(r"^\s*;\s*(LAYER_CHANGE|CHANGE_LAYER)\s*$", re.IGNORECASE)
 _Z_MARKER = re.compile(r"^\s*;\s*(?:Z|Z_HEIGHT)\s*:\s*(-?\d*\.?\d+)\s*$", re.IGNORECASE)
@@ -275,7 +276,7 @@ def bead_width(area: float, height: float) -> float:
 
 
 def read_text(path: Path) -> tuple[list[str], str]:
-    """Read a G-code file, refusing binary G-code up front."""
+    """Read a G-code file, decoding binary G-code on the way in."""
     if path.is_dir():
         raise GcodeError(f"{path}: is a directory, not a G-code file")
     try:
@@ -287,14 +288,19 @@ def read_text(path: Path) -> tuple[list[str], str]:
     except OSError as exc:
         raise GcodeError(f"{path}: cannot read ({exc.strerror or exc})") from exc
 
-    if raw[:4] == BGCODE_MAGIC or path.suffix.lower() == ".bgcode":
-        raise GcodeError(
-            f"{path}: this is binary G-code (.bgcode), which vaseweld cannot read. "
-            "Turn off 'Supports binary G-code' in Print Settings > Output options "
-            "(PrusaSlicer) and re-slice, or convert the file with bgcode."
-        )
     if not raw.strip():
         raise GcodeError(f"{path}: file is empty")
+
+    if is_bgcode(raw):
+        try:
+            return decode(raw).splitlines(), "\n"
+        except BgcodeError as exc:
+            raise GcodeError(f"{path}: {exc}") from exc
+    if path.suffix.lower() == ".bgcode":
+        raise GcodeError(
+            f"{path}: named .bgcode but does not start with the GCDE magic number. "
+            "Re-export it from the slicer."
+        )
 
     text = raw.decode("utf-8", errors="replace")
     newline = "\r\n" if text.count("\r\n") > text.count("\n") // 2 else "\n"

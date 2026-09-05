@@ -50,9 +50,21 @@ def test_object_instances_counted(orca_normal):
     assert parse_file(fixture("two_objects_1mm.gcode")).object_instances == 2
 
 
-def test_binary_gcode_is_refused_with_a_fix():
-    with pytest.raises(GcodeError, match="binary G-code"):
-        parse_file(fixture("binary_6mm.bgcode"))
+def test_binary_gcode_is_decoded_like_its_text_twin():
+    binary = parse_file(fixture("binary_6mm.bgcode"))
+    text = parse_file(fixture("prusaslicer_normal_6mm.gcode"))
+    assert len(binary.layers) == len(text.layers)
+    assert [layer.z for layer in binary.layers] == [layer.z for layer in text.layers]
+    # binary_gcode is the one key that legitimately differs
+    differing = {k for k in text.config if text.config[k] != binary.config.get(k)}
+    assert differing == {"binary_gcode"}
+
+
+def test_a_file_named_bgcode_without_the_magic_is_refused(tmp_path):
+    impostor = tmp_path / "x.bgcode"
+    impostor.write_text("G28\nG1 Z0.2\n")
+    with pytest.raises(GcodeError, match="GCDE magic number"):
+        parse_file(impostor)
 
 
 def test_missing_file():

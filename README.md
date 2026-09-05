@@ -160,8 +160,9 @@ reads `SLIC3R_PP_OUTPUT_NAME`, the name the slicer will save under, and prints i
 where the file is going.
 
 Two things to watch. Use absolute paths and quote them, because the field is not a shell. And turn
-off **Supports binary G-code** in the same Output options panel, because vaseweld reads text G-code
-only and will tell you so rather than guess.
+off **Supports binary G-code** in the same Output options panel. vaseweld reads `.bgcode` fine, but
+it writes plain G-code, so it will not overwrite a `.bgcode` file the slicer is about to save under
+that name. Printers that accept `.bgcode` accept plain G-code too.
 
 ## What it actually does
 
@@ -188,6 +189,11 @@ only and will tell you so rather than guess.
 - Recomputes the filament totals exactly, and remaps `M73` progress and the printing time estimate
   using the two files' own remaining-time values. When there is no `M73` data to remap from, it
   strips the time comments rather than leave them wrong.
+- Reads binary G-code (`.bgcode`) as well as text, decoding it in the tool with no converter on
+  PATH and no dependencies. Binarising moves the config block and the filament and time totals out
+  of the G-code stream into metadata blocks, so they are put back where a text file would have had
+  them and everything downstream works unchanged. The trailing comment on each command
+  (`G28 ; home all axes`) is gone for good; the binariser drops it.
 - Passes `G2`/`G3` arc moves through with their geometry untouched. Their E values are still
   converted, because leaving them absolute in a relative file would break the print.
 - Writes a `; vaseweld` provenance block into the header naming both inputs and the cut.
@@ -321,7 +327,7 @@ FAIL: 1 problem in broken.gcode
 
 These are out of scope for 1.0, not bugs:
 
-- Text G-code only. Binary `.bgcode` is refused with the setting to change.
+- Binary `.bgcode` can be read but not written. The output is always text G-code.
 - Single object, single material. This is the same constraint PrusaSlicer's own validator enforces,
   and vaseweld quotes it back at you: "The Spiral Vase option can only be used when printing single
   material objects."

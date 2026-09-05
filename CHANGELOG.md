@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.3.0
+
+- **Binary G-code (`.bgcode`) can be welded, checked, previewed and listed.** It used to be refused
+  with a note telling you which setting to turn off, which is the first thing a Prusa MK4 or Core
+  One owner hits, because binary G-code is on by default on those profiles. The decoder is in the
+  package: the block structure, heatshrink and MeatPack, about 260 lines and still no dependencies.
+  Binarising moves the config block and the filament and time totals out of the G-code stream into
+  metadata blocks, so those are put back where a text file would have carried them and the
+  compatibility check, the totals and the time remapping all work unchanged. Verified by welding a
+  binary pair and a text pair sliced from the same model with the same flags: the two welds carry
+  the same commands, line for line.
+- The output is still text G-code. `-o something.bgcode` is refused rather than writing a text file
+  under a binary name, which is a thing a printer would be entitled to reject.
+
 ## 1.2.2
 
 - The demo printed a cylinder. Every fixture in this repository is a plain 20 mm tube, which is the

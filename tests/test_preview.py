@@ -101,8 +101,6 @@ def test_cut_layers_are_flagged_for_the_readout(welded_file):
     assert data["roles"][149] == "normal"
 
 
-def test_preview_refuses_binary_gcode(tmp_path):
-    from vaseweld.parser import GcodeError
-
-    with pytest.raises(GcodeError, match="binary G-code"):
-        write(tmp_path / "x.html", fixture("binary_6mm.bgcode"))
+def test_preview_reads_binary_gcode(tmp_path):
+    page = write(tmp_path / "x.html", fixture("binary_6mm.bgcode"))
+    assert "<canvas" in page.read_text(encoding="utf-8")

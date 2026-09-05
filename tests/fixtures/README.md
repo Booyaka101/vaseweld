@@ -25,7 +25,8 @@ The models are `examples/cylinder_40mm.stl` and `examples/cylinder_6mm.stl`, gen
 | `two_objects_1mm.gcode` | PrusaSlicer 2.9.6 | two instances with `objects_info`, must be refused |
 | `bambustudio_normal_40mm.gcode` | BambuStudio 02.08.02.61 | config block at the top, `; CHANGE_LAYER` / `; Z_HEIGHT:` markers, retraction split between a wipe and an E-only tail |
 | `bambustudio_vase_40mm.gcode` | BambuStudio 02.08.02.61 | the same, spiral vase |
-| `binary_6mm.bgcode` | PrusaSlicer 2.9.6 | binary G-code, must be refused |
+| `binary_6mm.bgcode` | PrusaSlicer 2.9.6 | binary G-code, the text twin of `prusaslicer_normal_6mm.gcode` |
+| `binary_vase_6mm.bgcode` | PrusaSlicer 2.9.6 | the same, spiral vase, so a binary pair can be welded |
 
 ## Regenerating
 

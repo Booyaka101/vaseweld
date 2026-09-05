@@ -7,7 +7,7 @@ import re
 import pytest
 
 from conftest import fixture
-from vaseweld.parser import GcodeError, parse_move
+from vaseweld.parser import parse_move
 from vaseweld.validate import check
 from vaseweld.weld import weld
 
@@ -118,6 +118,5 @@ def test_mid_print_mode_switch_is_caught(welded_lines, write):
     assert any("switches to absolute" in problem.message for problem in report.problems)
 
 
-def test_check_refuses_binary_gcode():
-    with pytest.raises(GcodeError, match="binary G-code"):
-        check(fixture("binary_6mm.bgcode"))
+def test_check_reads_binary_gcode():
+    assert check(fixture("binary_6mm.bgcode")).ok

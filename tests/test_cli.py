@@ -86,7 +86,6 @@ def test_vase_first_inverts_the_order(tmp_path, capsys):
         pytest.param(
             {"vase": "mismatch_layerheight_6mm.gcode"}, "'layer_height'", id="profile-mismatch"
         ),
-        pytest.param({"normal": "binary_6mm.bgcode"}, "binary G-code", id="binary-gcode"),
         pytest.param({"normal": "two_objects_1mm.gcode"}, "single object", id="two-objects"),
         pytest.param({"at": "99"}, "Valid range is Z 0.400 to 6.000", id="cut-too-high"),
         pytest.param({"at": "0.2"}, "Valid range is Z 0.400 to 6.000", id="cut-on-layer-one"),
@@ -100,6 +99,14 @@ def test_weld_refusals_name_the_problem(tmp_path, capsys, kwargs, expected):
     code, _, stderr = run(weld_argv(**{"output": out, **kwargs}), capsys)
     assert code == EXIT_USAGE
     assert expected in stderr[0]
+    assert not out.exists()
+
+
+def test_writing_binary_gcode_is_refused(tmp_path, capsys):
+    out = tmp_path / "out.bgcode"
+    code, _, stderr = run(weld_argv(output=out), capsys)
+    assert code == EXIT_USAGE
+    assert "cannot write it" in stderr[0]
     assert not out.exists()
 
 
@@ -206,10 +213,10 @@ def test_layers_all_prints_every_layer(capsys):
     assert stdout[-1].strip() == "layer  200  Z 40.000"
 
 
-def test_layers_refuses_binary_gcode(capsys):
-    code, _, stderr = run(["layers", str(fixture("binary_6mm.bgcode"))], capsys)
-    assert code == EXIT_USAGE
-    assert "binary G-code" in stderr[0]
+def test_layers_reads_binary_gcode(capsys):
+    code, stdout, _ = run(["layers", str(fixture("binary_6mm.bgcode"))], capsys)
+    assert code == EXIT_OK
+    assert stdout[0].startswith("binary_6mm.bgcode: 30 layers, Z 0.200 to 6.000")
 
 
 def test_preview_writes_a_page_next_to_the_gcode(tmp_path, capsys):
@@ -223,9 +230,9 @@ def test_preview_writes_a_page_next_to_the_gcode(tmp_path, capsys):
     assert "open it in any browser" in stdout[0]
 
 
-def test_preview_refuses_binary_gcode(tmp_path, capsys):
-    code, _, stderr = run(
-        ["preview", str(fixture("binary_6mm.bgcode")), "-o", str(tmp_path / "x.html")], capsys
-    )
-    assert code == EXIT_USAGE
-    assert "binary G-code" in stderr[0]
+def test_preview_reads_binary_gcode(tmp_path, capsys):
+    page = tmp_path / "x.html"
+    code, stdout, _ = run(["preview", str(fixture("binary_6mm.bgcode")), "-o", str(page)], capsys)
+    assert code == EXIT_OK
+    assert page.exists()
+    assert stdout[0].startswith(f"wrote {page} (")

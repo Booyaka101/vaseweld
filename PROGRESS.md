@@ -1,6 +1,6 @@
 # PROGRESS
 
-vaseweld 1.2.2. Live at https://github.com/Booyaka101/vaseweld with the demo published at
+vaseweld 1.3.0. Live at https://github.com/Booyaka101/vaseweld with the demo published at
 https://booyaka101.github.io/vaseweld/. Not on PyPI and not tagged yet.
 
 A stranger can see it work without installing anything: `vaseweld preview` writes a self-contained
@@ -60,6 +60,15 @@ green against PrusaSlicer alone.
 
 ## Handled in the last pass
 
+- **Binary G-code is read now, not refused.** PrusaSlicer turns it on by default for the MK4 and
+  the Core One, so "turn off Supports binary G-code and re-slice" was the first thing a large share
+  of the target users would have hit. The decoder is in the package rather than shelled out to the
+  `bgcode` converter, which keeps the zero-dependency promise and works on a machine that has never
+  heard of libbgcode. Checked three ways: the decoded fixture carries the same commands as its text
+  twin line for line, a weld of the binary pair carries the same commands as the weld of the text
+  pair, and the 2.3 MB vase decodes in 0.51 s. The first heatshrink loop took 5.48 s for the same
+  file; inlining the bit reader and copying non-overlapping matches by slice fixed that.
+
 - **The demo printed a cylinder.** Every fixture here is a 20 mm tube, measured at 19.6 mm wide at
   layers 6, 61, 121 and 200, so the top view was a plain disc and the front view a plain rectangle
   no matter which section came from the vase slice. The weld was right and the demo did not show it.
@@ -97,7 +106,7 @@ green against PrusaSlicer alone.
   render is the honest option, and it is captioned as a render. **This is the one thing to replace
   before posting anywhere**: print the hybrid, photograph it, drop it in as the lead image.
 - **Not on PyPI, not tagged.** The repo is public and all three workflows are green on `main`, but
-  `twine upload` and `git tag v1.2.2` have not been run.
+  `twine upload` and `git tag v1.3.0` have not been run.
 - **`pipx run vaseweld` is untested against a real release**, because it resolves from PyPI. The
   local equivalent (clean venv + wheel + console script) passes. Note the uv/pipx trap: the console
   script is named `vaseweld`, the same as the package, so `uvx vaseweld` and `pipx run vaseweld`
@@ -110,7 +119,7 @@ green against PrusaSlicer alone.
 2. Print the hybrid, photograph it, replace `docs/weld-preview.png` as the lead image (keep the
    render lower down, it explains the mechanism).
 3. `python -m build && python -m twine upload dist/*` for PyPI.
-4. `git tag v1.2.2 && git push --tags` fires `.github/workflows/release.yml`, which builds
+4. `git tag v1.3.0 && git push --tags` fires `.github/workflows/release.yml`, which builds
    `vaseweld.exe`, checks the tag matches `__version__`, and attaches the exe, wheel, sdist and
    standalone `vaseweld.py` to the GitHub release. Cut the tag only after CI is green on that exact
    commit.
@@ -133,8 +142,6 @@ green against PrusaSlicer alone.
 
 ## Next steps, in the order they are worth doing
 
-- **`.bgcode` passthrough** by shelling out to the `bgcode` converter when it is on PATH, instead of
-  refusing.
 - **Cura.** `parser.py` already recognises Cura's `;LAYER:` markers, but Cura writes no config block,
   so `compat.py` would fall back to the first-layer footprint alone, and there is no Cura fixture.
   Do not claim Cura support until there is one.
