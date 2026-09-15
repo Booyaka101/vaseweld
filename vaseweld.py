@@ -1014,12 +1014,36 @@ SPIRAL_VASE_OVERRIDES = (
     "--thin-walls=0",
 )
 
+# Without this the normal pass inherits spiral_vase from the project or the --load ini, and
+# a plate saved with the checkbox already on slices both passes as a vase. The ladders match,
+# so nothing downstream notices, and the "solid base" is a single wall.
+NORMAL_OVERRIDES = ("--spiral-vase=0",)
+
+# ...but turning the mode off is not enough on its own. normalize_fdm() forces these three
+# the moment it sees spiral_vase, and on 2.9.6 it runs over the loaded config *before* the
+# command line overrides land, so --spiral-vase=0 alone still yields one perimeter, no infill
+# and no lid. Measured: a project holding perimeters=7/top_solid_layers=4/fill_density=35%
+# slices its normal pass at 1/0/0%. So read what the config meant and hand it back. The
+# fallbacks are 2.9.6's own defaults, for a config that never named the key.
+VASE_CLOBBERED = (("perimeters", "3"), ("top_solid_layers", "3"), ("fill_density", "20%"))
+
 VERIFIED_SERIES = (2, 9)
 REFACTORED_SERIES = (3, 0)
 
+PRINT_CONFIG = "Metadata/Slic3r_PE.config"
+
 _BANNER = re.compile(r"PrusaSlicer-(\d+)\.(\d+)\.(\d+)(\S*)")
 _EXE_NAMES = ("prusa-slicer-console.exe", "prusa-slicer", "prusa-slicer.exe", "PrusaSlicer")
+# --slicer-path at a .app is the natural thing to try on macOS; the binary is buried in it.
+_BUNDLE_BINARY = "Contents/MacOS/PrusaSlicer"
 _PROBE_TIMEOUT = 60.0
+# A project's embedded config uses the G-code footer's "; key = value"; an ini drops the ";".
+_SETTING = re.compile(r"^\s*(?:;\s*)?([a-z][a-z0-9_]*)\s*=\s*(.*?)\s*$")
+_VASE_FINGERPRINT = (
+    ("perimeters", ("1",)),
+    ("top_solid_layers", ("0",)),
+    ("fill_density", ("0", "0%")),
+)
 
 
 class SlicerError(Exception):
@@ -1101,12 +1125,12 @@ def find_slicer(explicit: Path | str | None = None) -> Path:
     if explicit is not None:
         path = Path(explicit)
         if path.is_dir():
-            for name in _EXE_NAMES:
+            for name in (_BUNDLE_BINARY, *_EXE_NAMES):
                 if (path / name).is_file():
                     return path / name
             raise SlicerError(
                 f"{path} is a directory with no PrusaSlicer binary in it. "
-                f"Point --slicer-path at one of {', '.join(_EXE_NAMES)}."
+                f"Point --slicer-path at {_binary_hint()}."
             )
         if not path.is_file():
             raise SlicerError(f"{path}: no such file. Check --slicer-path.")
@@ -1124,6 +1148,14 @@ def find_slicer(explicit: Path | str | None = None) -> Path:
     raise SlicerError(
         f"PrusaSlicer not found. Pass --slicer-path, or install it from {DOWNLOAD_URL}"
     )
+
+
+def _binary_hint() -> str:
+    if sys.platform == "win32":
+        return "prusa-slicer-console.exe"
+    if sys.platform == "darwin":
+        return f"PrusaSlicer.app, or the {_BUNDLE_BINARY} inside it"
+    return "prusa-slicer"
 
 
 def _capture(argv: list[str], timeout: float | None) -> subprocess.CompletedProcess:
@@ -1183,9 +1215,11 @@ def version_complaint(found: Slicer) -> VersionComplaint | None:
             fatal=True,
         )
     if found.series != VERIFIED_SERIES:
+        verified = f"{VERIFIED_SERIES[0]}.{VERIFIED_SERIES[1]}.x"
+        side = "older than" if found.series < VERIFIED_SERIES else "newer than"
         return VersionComplaint(
-            f"PrusaSlicer {found.version} is older than the "
-            f"{VERIFIED_SERIES[0]}.{VERIFIED_SERIES[1]}.x that vaseweld auto is verified against.",
+            f"PrusaSlicer {found.version} is {side} the {verified} "
+            "that vaseweld auto is verified against.",
             fatal=False,
         )
     return None
@@ -1201,6 +1235,58 @@ def _unidentified(found: Slicer) -> str:
         f"{found.path} does not identify itself as PrusaSlicer ({said}). "
         f"vaseweld auto drives PrusaSlicer "
         f"{VERIFIED_SERIES[0]}.{VERIFIED_SERIES[1]}.x only.{hint}"
+    )
+
+
+def print_config(path: Path) -> dict[str, str]:
+    """The print settings a project or a --load ini carries. Empty if it carries none."""
+    try:
+        if path.suffix.lower() == ".3mf":
+            with zipfile.ZipFile(path) as archive:
+                if PRINT_CONFIG not in archive.namelist():
+                    return {}
+                text = archive.read(PRINT_CONFIG).decode("utf-8", errors="replace")
+        else:
+            text = path.read_text(encoding="utf-8", errors="replace")
+    except (zipfile.BadZipFile, NotImplementedError, RuntimeError, OSError, ValueError):
+        return {}
+    found = (_SETTING.match(line) for line in text.splitlines())
+    return {m.group(1): m.group(2) for m in found if m}
+
+
+def merged_config(source: Path, load: tuple[Path, ...] = ()) -> dict[str, str]:
+    """What PrusaSlicer will end up loading. Each --load wins over the project."""
+    config = print_config(source)
+    for ini in load:
+        config.update(print_config(ini))
+    return config
+
+
+def _vase_is_on(config: dict[str, str]) -> bool:
+    return config.get("spiral_vase", "0").strip() not in ("", "0", "false", "nil")
+
+
+def normal_overrides(config: dict[str, str]) -> tuple[str, ...]:
+    """Turn spiral vase off for the normal pass, and put back what normalize_fdm ate."""
+    if not _vase_is_on(config):
+        return NORMAL_OVERRIDES
+    restored = tuple(
+        f"--{key.replace('_', '-')}={config.get(key) or default}" for key, default in VASE_CLOBBERED
+    )
+    return NORMAL_OVERRIDES + restored
+
+
+def unrecoverable_vase(config: dict[str, str]) -> str | None:
+    """Warn when the saved config *is* the vase set, so the base can only be a single wall."""
+    if not _vase_is_on(config):
+        return None
+    if any(config.get(key) not in vase for key, vase in _VASE_FINGERPRINT):
+        return None
+    return (
+        "this project was saved with spiral vase switched on, so it no longer records the "
+        "perimeter and infill settings it had before. The normal pass can only be sliced the "
+        "way the project reads now, which is a single wall with no infill. Untick Spiral Vase "
+        "in PrusaSlicer and save the project again, or pass a normal profile with --load."
     )
 
 
@@ -1242,6 +1328,12 @@ def run_slice(
     argv = slicer_argv(found, source, destination, overrides=overrides, load=load)
     if echo is not None:
         print(f"  $ {quoted(argv)}", file=echo)
+    # the file existing afterwards is the only proof a pass worked, so a leftover
+    # from an earlier --keep-slices run into the same directory has to go first
+    try:
+        destination.unlink(missing_ok=True)
+    except OSError as exc:
+        raise SlicerError(f"{destination}: cannot replace it ({exc.strerror or exc})") from exc
     try:
         done = _capture(argv, timeout)
     except subprocess.TimeoutExpired:
@@ -1290,8 +1382,11 @@ MODEL_CONFIG = "Metadata/Slic3r_PE_model.config"
 MODEL_FILE = "3D/3dmodel.model"
 
 _OBJECT = re.compile(r'<object\b[^>]*\binstances_count="(\d+)"')
-_BUILD_ITEM = re.compile(r"<item\b[^>]*objectid=\"(\d+)\"")
-_EXTRUDER = re.compile(r'<metadata\b[^>]*\bkey="extruder"[^>]*\bvalue="(\d+)"')
+_BUILD_ITEM = re.compile(r'<item\b[^>]*?\bobjectid="(\d+)"[^>]*>')
+_UNPRINTABLE = re.compile(r'\bprintable="0"')
+_EXTRUDER = re.compile(
+    r'<metadata\b[^>]*\btype="(object|volume)"[^>]*\bkey="extruder"[^>]*\bvalue="(\d+)"'
+)
 
 
 class PreflightError(Exception):
@@ -1337,17 +1432,38 @@ def inspect_plate(path: Path) -> Plate:
         ) from exc
 
     counts = [int(n) for n in _OBJECT.findall(config)]
-    items = _BUILD_ITEM.findall(model)
-    objects = len(counts) or len(set(items)) or 1
-    instances = sum(counts) if counts else (len(items) or 1)
-    extruders = frozenset(int(n) for n in _EXTRUDER.findall(config))
+    live = _printable_items(model)
+    if live is None:
+        objects = len(counts) or 1
+        instances = sum(counts) or 1
+    else:
+        instances = len(live)
+        # the config groups copies under one <object>, the build lists them one per <item>,
+        # so only the config can tell "two objects" from "two copies of one"
+        objects = 1 if len(counts) == 1 and instances > 1 else len(set(live)) or len(counts) or 1
     return Plate(
         path=path,
         objects=objects,
         instances=instances,
-        extruders=extruders,
+        extruders=_extruders_used(config),
         inspected=True,
     )
+
+
+def _extruders_used(config: str) -> frozenset[int]:
+    """The extruders the volumes actually print with, resolved through the object default."""
+    assigned = [(scope, int(n)) for scope, n in _EXTRUDER.findall(config)]
+    # 0 means "inherit", so a volume at 0 beside a volume at 2 is still two materials
+    default = next((n for scope, n in assigned if scope == "object" and n), 1)
+    return frozenset(n or default for scope, n in assigned if scope == "volume")
+
+
+def _printable_items(model: str) -> list[str] | None:
+    """Object ids of the instances actually set to print, or None if there is no build section."""
+    items = [(m.group(1), m.group(0)) for m in _BUILD_ITEM.finditer(model)]
+    if not items:
+        return None
+    return [objectid for objectid, tag in items if not _UNPRINTABLE.search(tag)]
 
 
 def _read_member(archive: zipfile.ZipFile, name: str, names: set[str]) -> str:
@@ -1359,6 +1475,11 @@ def _read_member(archive: zipfile.ZipFile, name: str, names: set[str]) -> str:
 def check_plate(path: Path) -> Plate:
     """Raise PreflightError unless this project is a single-material single object."""
     plate = inspect_plate(path)
+    if plate.instances < 1:
+        raise PreflightError(
+            f"{plate.path.name} has nothing on it set to print. "
+            "Set the object printable in PrusaSlicer and save the project again."
+        )
     if plate.instances > 1 or plate.objects > 1:
         what = (
             f"{plate.objects} objects"
@@ -3082,7 +3203,20 @@ def _weld_files(
     return EXIT_OK
 
 
-def _ladder_divergence(normal: GcodeFile, vase: GcodeFile) -> str | None:
+def _mode_divergence(normal: GcodeFile, vase: GcodeFile) -> str | None:
+    """The two passes are meant to differ in exactly one setting. Check PrusaSlicer agreed."""
+    modes = (normal.config.get("spiral_vase"), vase.config.get("spiral_vase"))
+    if None in modes or modes == ("0", "1"):
+        return None
+    both = "as a vase" if modes == ("1", "1") else "with spiral vase off"
+    return (
+        f"both passes were sliced {both} (spiral_vase={modes[0]} and {modes[1]}), so there is "
+        "nothing to weld. PrusaSlicer did not take the override; run with --verbose to see the "
+        "command line it was given."
+    )
+
+
+def _ladder_divergence(normal: GcodeFile, vase: GcodeFile, tail: str = "") -> str | None:
     """Why these two slices cannot be welded, if their Z ladders are not the same one."""
     a, b = _ladder(normal), _ladder(vase)
     if a == b:
@@ -3091,7 +3225,6 @@ def _ladder_divergence(normal: GcodeFile, vase: GcodeFile) -> str | None:
         "the two slices disagree about layer Z, so welding them would produce a "
         "plausible-looking file that does not print. "
     )
-    tail = " Re-run with --keep-slices to look at both passes."
     for index, (left, right) in enumerate(zip(a, b), start=1):
         if left != right:
             return (
@@ -3154,12 +3287,17 @@ def _run_auto(args: argparse.Namespace, out: "object") -> int:
     print(plate.describe(), file=out)
     echo = out if args.verbose else None
 
+    config = merged_config(project, load)
+    lost = unrecoverable_vase(config)
+    if lost is not None:
+        print(f"warning: {lost}", file=sys.stderr)
+
     with _SliceDir(args.keep_slices) as workdir:
         normal_path = workdir / f"{project.stem}-normal.gcode"
         vase_path = workdir / f"{project.stem}-spiral.gcode"
         for step, (destination, overrides, label) in enumerate(
             (
-                (normal_path, (), "normal"),
+                (normal_path, normal_overrides(config), "normal"),
                 (vase_path, SPIRAL_VASE_OVERRIDES, "spiral vase"),
             ),
             start=1,
@@ -3176,14 +3314,21 @@ def _run_auto(args: argparse.Namespace, out: "object") -> int:
                 echo=echo,
             )
 
+        # said before the checks below, so an abort still tells the user where to look
+        if args.keep_slices is not None:
+            print(f"kept both slices in {workdir}", file=out)
+
         normal, vase = parse_file(normal_path), parse_file(vase_path)
-        divergence = _ladder_divergence(normal, vase)
+        look = (
+            f" Both passes are in {workdir}."
+            if args.keep_slices is not None
+            else " Re-run with --keep-slices to look at both passes."
+        )
+        divergence = _ladder_divergence(normal, vase, look) or _mode_divergence(normal, vase)
         if divergence is not None:
             raise WeldError(divergence)
         for line in _ladder_report(vase, project.name):
             print(line, file=out)
-        if args.keep_slices is not None:
-            print(f"kept both slices in {workdir}", file=out)
         return _weld_files(args, out, normal, vase, output)
 
 

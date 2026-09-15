@@ -24,9 +24,29 @@
   builds warn and carry on.
 - PrusaSlicer exits 0 and writes nothing when a slice fails, so the return code alone proves nothing.
   `auto` checks the file exists and reports the last line PrusaSlicer printed when it does not.
+- The normal pass really is a normal pass. Passing `--spiral-vase=0` turns the mode off, but
+  PrusaSlicer folds spiral vase into the loaded config before it looks at the command line, so a
+  project holding `perimeters = 7`, `top_solid_layers = 4`, `fill_density = 35%` still sliced its
+  normal pass at `1`, `0`, `0%`: a hollow single-wall base, which is the one thing the weld exists
+  to avoid. `auto` now reads the project's own print settings, and any `--load` ini layered over
+  them, and hands those three values straight back on the command line. Measured on 2.9.6, the
+  normal pass goes from 0 perimeter and 0 infill sections to 29 and 22. Where the project was saved
+  after accepting PrusaSlicer's "shall I adjust those settings" dialog the originals are gone from
+  the file, and `auto` says so rather than pretending otherwise. As a backstop it also reads
+  `spiral_vase` back out of both sliced files and refuses to weld two passes that came out in the
+  same mode.
+- A plate is counted the way PrusaSlicer counts it. Objects parked as not printable are not on the
+  plate, and volume extruder `0` means "inherit the object's extruder" rather than a second
+  material, so neither is refused any more. A volume left at `0` next to one assigned to extruder 2
+  is still two materials and is still refused.
+- `--slicer-path` accepts a macOS `.app` bundle, not just the binary buried inside it, and the
+  error for a directory with no slicer in it names something that exists on your platform.
 - `--verbose` prints the exact command line each pass runs, quoted for your shell, before the output
   of that pass. `--keep-slices DIR` keeps both intermediate slices instead of using a temp dir, which
-  is what the Z-ladder abort tells you to reach for.
+  is what the Z-ladder abort tells you to reach for, unless you already passed it, in which case the
+  abort names the directory the two passes are sitting in. Running twice into the same kept directory
+  is safe: each pass deletes its target first, so a failed slice can never weld the previous run's
+  output.
 
 ## 1.3.0
 

@@ -7,15 +7,19 @@ from pathlib import Path
 import pytest
 
 import vaseweld.slicer
-from conftest import fixture
+from conftest import fixture, project_3mf
 from vaseweld.slicer import (
+    NORMAL_OVERRIDES,
     SPIRAL_VASE_OVERRIDES,
     Slicer,
     SlicerError,
     find_slicer,
+    merged_config,
+    normal_overrides,
     probe_slicer,
     run_slice,
     slicer_argv,
+    unrecoverable_vase,
     version_complaint,
 )
 
@@ -197,3 +201,110 @@ def test_verbose_shows_a_command_line_you_could_paste_back(fake_slicer, tmp_path
     assert len(shown) == 1
     assert str(fake_slicer.path) in shown[0]
     assert shown[0].endswith("cylinder_6mm.3mf") or shown[0].endswith('cylinder_6mm.3mf"')
+
+
+def test_a_leftover_file_does_not_count_as_a_successful_pass(fake_slicer, tmp_path, capsys):
+    """--keep-slices into the same directory twice must not weld the previous run's output."""
+    destination = tmp_path / "out.gcode"
+    destination.write_text("; left over from the run before\n", encoding="utf-8")
+    fake_slicer.normal = None
+    fake_slicer.returncode = 1
+    fake_slicer.stderr = "Error: The supplied file could not be read\n"
+    found = probe_slicer(fake_slicer.path)
+    with pytest.raises(SlicerError) as excinfo:
+        run_slice(found, fixture("cylinder_6mm.3mf"), destination)
+    assert "could not be read" in str(excinfo.value)
+    assert not destination.exists()
+
+
+def test_the_normal_pass_turns_spiral_vase_off_rather_than_leaving_it(fake_slicer, tmp_path):
+    found = probe_slicer(fake_slicer.path)
+    argv = slicer_argv(
+        found, fixture("cylinder_6mm.3mf"), tmp_path / "out.gcode", overrides=NORMAL_OVERRIDES
+    )
+    assert NORMAL_OVERRIDES == ("--spiral-vase=0",)
+    assert "--spiral-vase=0" in argv
+
+
+def test_a_newer_series_is_not_called_older(tmp_path):
+    complaint = version_complaint(Slicer(path=tmp_path / "ps", banner="", release=(2, 10, 0)))
+    assert "2.10.0 is newer than the 2.9.x" in complaint.message
+    assert not complaint.fatal
+
+
+def test_a_vase_project_hands_back_what_normalize_would_eat(tmp_path):
+    """--spiral-vase=0 alone is not enough: 2.9.6 normalizes the config before overrides land."""
+    project = project_3mf(
+        tmp_path,
+        "vase.3mf",
+        spiral_vase="1",
+        perimeters="7",
+        top_solid_layers="4",
+        fill_density="35%",
+    )
+    assert normal_overrides(merged_config(project)) == (
+        "--spiral-vase=0",
+        "--perimeters=7",
+        "--top-solid-layers=4",
+        "--fill-density=35%",
+    )
+
+
+def test_a_project_that_was_never_a_vase_keeps_its_own_settings(tmp_path):
+    project = project_3mf(tmp_path, "plain.3mf", spiral_vase="0", perimeters="7")
+    assert normal_overrides(merged_config(project)) == NORMAL_OVERRIDES
+
+
+def test_a_load_ini_wins_over_the_project_the_way_prusaslicer_reads_them(tmp_path):
+    project = project_3mf(tmp_path, "vase.3mf", spiral_vase="1", perimeters="7")
+    ini = tmp_path / "normal.ini"
+    ini.write_text("spiral_vase = 0\nperimeters = 2\n", encoding="utf-8")
+    assert normal_overrides(merged_config(project, (ini,))) == NORMAL_OVERRIDES
+
+
+def test_a_vase_ini_over_a_plain_project_restores_the_projects_values(tmp_path):
+    project = project_3mf(tmp_path, "plain.3mf", spiral_vase="0", perimeters="7")
+    ini = tmp_path / "vase.ini"
+    ini.write_text("spiral_vase = 1\n", encoding="utf-8")
+    overrides = normal_overrides(merged_config(project, (ini,)))
+    assert "--perimeters=7" in overrides
+    # never named in either file, so the only honest answer is PrusaSlicer's own default
+    assert "--fill-density=20%" in overrides
+
+
+def test_a_project_saved_with_the_checkbox_on_says_what_cannot_be_recovered(tmp_path):
+    saved = project_3mf(
+        tmp_path,
+        "saved.3mf",
+        spiral_vase="1",
+        perimeters="1",
+        top_solid_layers="0",
+        fill_density="0%",
+    )
+    warning = unrecoverable_vase(merged_config(saved))
+    assert warning is not None
+    assert "Untick Spiral Vase" in warning
+    intact = project_3mf(tmp_path, "intact.3mf", spiral_vase="1", perimeters="3")
+    assert unrecoverable_vase(merged_config(intact)) is None
+
+
+def test_a_model_with_no_config_in_it_asks_for_nothing_back(tmp_path):
+    """A plain mesh has no print settings, and a binary STL must not read as any."""
+    assert merged_config(fixture("cylinder_6mm.3mf")) == {}
+    stl = tmp_path / "cylinder.stl"
+    stl.write_bytes(bytes([0]) + b"solid = nonsense" + bytes(range(256)) * 4)
+    assert normal_overrides(merged_config(stl)) == NORMAL_OVERRIDES
+
+
+def test_a_macos_app_bundle_is_a_slicer_path_worth_accepting(tmp_path):
+    binary = tmp_path / "PrusaSlicer.app" / "Contents" / "MacOS" / "PrusaSlicer"
+    binary.parent.mkdir(parents=True)
+    binary.write_text("#!/bin/sh\n", encoding="utf-8")
+    assert find_slicer(tmp_path / "PrusaSlicer.app") == binary
+
+
+def test_a_directory_with_nothing_in_it_still_says_what_to_point_at(tmp_path):
+    with pytest.raises(SlicerError) as excinfo:
+        find_slicer(tmp_path)
+    assert "no PrusaSlicer binary in it" in str(excinfo.value)
+    assert ".exe" in str(excinfo.value) or "prusa-slicer" in str(excinfo.value)

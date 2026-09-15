@@ -2,13 +2,14 @@ from __future__ import annotations
 
 import os
 import shutil
+from pathlib import Path
 
 import pytest
 
 import vaseweld.slicer
-from conftest import FakePrusaSlicer, example, fixture, multi_material_3mf
+from conftest import FakePrusaSlicer, example, fixture, multi_material_3mf, project_3mf
 from vaseweld.cli import EXIT_OK, EXIT_USAGE, main
-from vaseweld.slicer import DOWNLOAD_URL, SPIRAL_VASE_OVERRIDES
+from vaseweld.slicer import DOWNLOAD_URL, NORMAL_OVERRIDES, SPIRAL_VASE_OVERRIDES
 
 PROJECT = "cylinder_6mm.3mf"
 
@@ -20,9 +21,10 @@ def run(argv, capsys):
 
 
 def auto_argv(fake, output, project=PROJECT, at="3", extra=()):
+    """Build an `auto` argv. A str names a fixture; a Path is used verbatim."""
     return [
         "auto",
-        str(fixture(project)),
+        str(project if isinstance(project, Path) else fixture(project)),
         "--slicer-path",
         str(fake.path),
         "--at",
@@ -76,10 +78,11 @@ def test_both_passes_run_the_exact_command_line(fake_slicer, tmp_path, capsys):
     normal, vase = fake_slicer.slices
 
     assert normal[:4] == [str(fake_slicer.path), "--export-gcode", "--load", str(config)]
-    assert normal[4] == "--output"
-    assert normal[5].endswith("cylinder_6mm-normal.gcode")
-    assert normal[6] == str(fixture(PROJECT))
-    assert len(normal) == 7
+    assert tuple(normal[4:5]) == NORMAL_OVERRIDES
+    assert normal[5] == "--output"
+    assert normal[6].endswith("cylinder_6mm-normal.gcode")
+    assert normal[7] == str(fixture(PROJECT))
+    assert len(normal) == 8
 
     assert vase[:4] == normal[:4]
     assert tuple(vase[4:11]) == SPIRAL_VASE_OVERRIDES
@@ -283,3 +286,71 @@ def test_the_fake_is_not_quietly_a_real_install(fake_slicer):
     """If this ever fails, every test above it may have been driving the real binary."""
     assert isinstance(fake_slicer, FakePrusaSlicer)
     assert fake_slicer.path.read_text(encoding="utf-8") == "stand-in for prusa-slicer\n"
+
+
+def test_a_project_saved_with_spiral_vase_on_still_gets_a_solid_base(fake_slicer, tmp_path, capsys):
+    """Without --spiral-vase=0 the normal pass inherits it and both passes come out a vase."""
+    code, _, _ = run(auto_argv(fake_slicer, tmp_path / "out.gcode"), capsys)
+    assert code == EXIT_OK
+    normal, vase = fake_slicer.slices
+    assert "--spiral-vase=0" in normal
+    assert "--spiral-vase=1" in vase
+
+
+def test_a_second_run_into_the_same_kept_directory_does_not_reuse_the_first(
+    fake_slicer, tmp_path, capsys
+):
+    kept = tmp_path / "slices"
+    extra = ["--keep-slices", str(kept)]
+    assert run(auto_argv(fake_slicer, tmp_path / "a.gcode", extra=extra), capsys)[0] == EXIT_OK
+
+    fake_slicer.normal = None
+    fake_slicer.returncode = 1
+    fake_slicer.stderr = "Error: The supplied file could not be read\n"
+    code, _, stderr = run(auto_argv(fake_slicer, tmp_path / "b.gcode", extra=extra), capsys)
+    assert code == EXIT_USAGE
+    assert "could not be read" in stderr[0]
+    assert not (tmp_path / "b.gcode").exists()
+
+
+def test_two_passes_in_the_same_mode_are_refused_rather_than_welded(fake_slicer, tmp_path, capsys):
+    """If PrusaSlicer ever ignored the override, the ladders would still match."""
+    fake_slicer.normal = fake_slicer.vase
+    code, _, stderr = run(auto_argv(fake_slicer, tmp_path / "out.gcode"), capsys)
+    assert code == EXIT_USAGE
+    assert "both passes were sliced as a vase" in stderr[0]
+    assert "--verbose" in stderr[0]
+
+
+def test_the_abort_points_at_the_slices_when_they_were_already_kept(fake_slicer, tmp_path, capsys):
+    """Telling someone who passed --keep-slices to re-run with --keep-slices helps nobody."""
+    fake_slicer.vase = "mismatch_layerheight_6mm.gcode"
+    kept = tmp_path / "slices"
+    argv = auto_argv(fake_slicer, tmp_path / "out.gcode", extra=["--keep-slices", str(kept)])
+    code, stdout, stderr = run(argv, capsys)
+    assert code == EXIT_USAGE
+    assert f"kept both slices in {kept}" in stdout
+    assert f"Both passes are in {kept}." in stderr[0]
+    assert "Re-run with --keep-slices" not in stderr[0]
+
+
+def test_the_abort_suggests_keeping_them_when_they_were_not(fake_slicer, tmp_path, capsys):
+    fake_slicer.vase = "mismatch_layerheight_6mm.gcode"
+    code, _, stderr = run(auto_argv(fake_slicer, tmp_path / "out.gcode"), capsys)
+    assert code == EXIT_USAGE
+    assert "Re-run with --keep-slices to look at both passes." in stderr[0]
+
+
+def test_a_vase_project_slices_its_normal_pass_with_the_settings_restored(
+    fake_slicer, tmp_path, capsys
+):
+    project = project_3mf(
+        tmp_path, "vase.3mf", spiral_vase="1", perimeters="7", top_solid_layers="4"
+    )
+    argv = auto_argv(fake_slicer, tmp_path / "out.gcode", project=project)
+    assert run(argv, capsys)[0] == EXIT_OK
+    normal, vase = fake_slicer.slices
+    assert "--perimeters=7" in normal
+    assert "--top-solid-layers=4" in normal
+    assert "--spiral-vase=0" in normal
+    assert "--perimeters=1" in vase
