@@ -1,5 +1,33 @@
 # Changelog
 
+## 1.4.0
+
+- **`vaseweld auto` slices the project for you.** Point it at a `.3mf` or any model PrusaSlicer
+  opens and it runs both passes itself, normal and spiral vase, then welds them:
+  `vaseweld auto vase.3mf --at 6.0 -o hybrid.gcode`. The manual route is unchanged and still works
+  with OrcaSlicer and BambuStudio output; `auto` drives PrusaSlicer 2.9.x only, because the other
+  two take a different command line and keep their settings in profile JSON rather than flags.
+- The spiral pass carries the whole companion override set, not just `--spiral-vase`. PrusaSlicer's
+  GUI turns off perimeters, top layers, infill, supports and thin walls alongside the checkbox, from
+  a dialog that never runs headless. Measured against 2.9.6, three of those are already forced by
+  `normalize_fdm`, two stop `validate()` refusing the slice outright when your profile has supports
+  on, and `thin_walls` is the one that quietly moves the toolpath. `--spiral-vase=1 --thin-walls=0`
+  reproduces the full set byte for byte; `--spiral-vase=1` on its own does not.
+- A plate `auto` cannot weld is refused from the project file, before either slice runs. Two objects,
+  two copies of one object, or parts assigned to different extruders all cost a message rather than
+  two slicing runs.
+- Both passes are compared layer by layer before welding. If the two Z ladders differ at all, `auto`
+  names the first layer that disagrees and stops, rather than producing a plausible-looking file that
+  does not print. Adaptive layer height is what causes this.
+- Versions other than 2.9.x are called out. 3.0.0-alpha11 refactored the whole command line parser
+  upstream, so `auto` refuses to drive a 3.x build unless you pass `--force-slicer-version`. Older
+  builds warn and carry on.
+- PrusaSlicer exits 0 and writes nothing when a slice fails, so the return code alone proves nothing.
+  `auto` checks the file exists and reports the last line PrusaSlicer printed when it does not.
+- `--verbose` prints the exact command line each pass runs, quoted for your shell, before the output
+  of that pass. `--keep-slices DIR` keeps both intermediate slices instead of using a temp dir, which
+  is what the Z-ladder abort tells you to reach for.
+
 ## 1.3.0
 
 - **Binary G-code (`.bgcode`) can be welded, checked, previewed and listed.** It used to be refused
