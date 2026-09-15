@@ -49,9 +49,9 @@ Everything below was executed on this machine against a real PrusaSlicer 2.9.6, 
   `PrusaSlicer not found. Pass --slicer-path, or install it from https://www.prusa3d.com/prusaslicer/`.
   Confirmed on this machine, where the only PrusaSlicer is a portable build outside every standard
   location.
-- **252 tests, 251 pass and one is skipped** unless `VASEWELD_E2E=1`. That one drives the real
+- **258 tests, 257 pass and one is skipped** unless `VASEWELD_E2E=1`. That one drives the real
   binary end to end; it passes here with `VASEWELD_SLICER` pointed at the portable build. 161 of the
-  252 predate this release and still pass unchanged.
+  258 predate this release and still pass unchanged.
 - **The published artefact was run, not just built.** `python -m build --wheel`, installed into a
   fresh venv, and `vaseweld auto examples/vase.3mf --at 6.0` run through the console entry point
   produced the same 21294-line file, which `vaseweld check` passes.
@@ -227,6 +227,20 @@ Everything below was executed on this machine against a real PrusaSlicer 2.9.6, 
     `printer_model`, the parent ignored outright. Confirmed end to end on a plain profile that sets
     `retract_layer_change = 1`: the normal pass now carries six overrides instead of one, keeps the
     profile's own `1`, and its body matches a plain slice of the same file line for line.
+- **An eighth review pass found two, and one of them predates this branch.**
+  - `vaseweld auto .` died with a Python traceback instead of "`.` is a directory, not a model".
+    The default output name is built from the project's stem, and `Path(".").with_name(...)` raises
+    `ValueError: has an empty name`. The same for `..`, an empty string and a drive root. Preflight
+    already had the right message for a directory with a name, so it runs before the name is built
+    now, not after.
+  - `--at nan` ran both slicing passes to completion and then crashed on
+    `IndexError: list index out of range`. The range check was a pair of one-sided comparisons,
+    `cut_z < lowest or cut_z > highest`, and nan is False against both, so it sailed through and
+    `_snap` found no layer at or below it. The hole is in `weld.py` and is as old as `weld`, but
+    `auto` is what makes it cost two slicing runs. Both ends are fixed: the check is a containment
+    test, which nan fails the way it should, and `--at` refuses anything that is not a finite number
+    at the flag, so nothing runs at all. `--at inf` used to reach the range message after slicing
+    and is now refused with the rest.
 - **Clone check.** difflib over the line lists of every new function against all 112 functions in
   the package. The first pass put `probe_slicer` against `run_slice` at 38.2%: both built the same
   six-keyword `subprocess.run` call, and the review pass had just added `stdin=DEVNULL` to each of
@@ -250,7 +264,11 @@ Everything below was executed on this machine against a real PrusaSlicer 2.9.6, 
   the config, and say entirely different things about entirely different keys. The truthiness rule
   they share is real duplication, so it came out into `_is_on` rather than being written twice.
   Removing the spiral vase gate left `_vase_is_on` with no callers and it is gone; ruff does not
-  flag a private module function nobody calls, so that one is on the reader.
+  flag a private module function nobody calls, so that one is on the reader. The eighth added one,
+  `_cut_height`, at 30.0% against `_retract_length` in `validate.py`, which is the shape of a
+  try/except round a `float()` and nothing else. Its two fixes needed no new tests of their own
+  either: the nan and inf cases went into the parametrize list of the range test that was already
+  there, rather than a near-copy of it.
 
 ## Verified working
 
@@ -269,7 +287,7 @@ Every claim below was executed on this machine, not inferred.
 - **Three delivery paths, byte-identical output.** Wheel installed into a clean venv, standalone
   `vaseweld.py`, and a PyInstaller `vaseweld.exe` built and run on Windows. All three produced
   sha256 `5c03b42c1bf4ac10...` for the same weld.
-- **The suite passes** with `python -m pytest`, 252 tests in about 45 seconds. That includes a
+- **The suite passes** with `python -m pytest`, 258 tests in about 45 seconds. That includes a
   matrix that welds all three slicers in both directions at two cut heights and runs `check` on
   every result.
 - **Three slicers, both directions, two cut heights.** All twelve welds pass `vaseweld check`.

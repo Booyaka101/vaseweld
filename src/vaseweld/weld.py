@@ -331,7 +331,7 @@ def _seam_lines(
 
 def _snap(top: GcodeFile, cut_z: float) -> Layer:
     lowest, highest = top.layers[1].z, top.layers[-1].z
-    if cut_z < lowest - 1e-9 or cut_z > highest + 1e-9:
+    if not lowest - 1e-9 <= cut_z <= highest + 1e-9:
         raise WeldError(
             f"cut Z={cut_z:.3f} is outside the weldable range. "
             f"Valid range is Z {lowest:.3f} to {highest:.3f} "

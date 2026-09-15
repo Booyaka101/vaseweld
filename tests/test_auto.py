@@ -354,6 +354,15 @@ def test_an_output_directory_that_is_not_there_is_caught_before_slicing(
     assert fake_slicer.slices == []
 
 
+def test_a_path_with_no_name_is_refused_like_any_other_directory(fake_slicer, capsys):
+    """`.` has no stem, and the default output name used to be built from it before preflight ran."""
+    argv = ["auto", ".", "--slicer-path", str(fake_slicer.path), "--at", "3"]
+    code, _, stderr = run(argv, capsys)
+    assert code == EXIT_USAGE
+    assert "is a directory, not a model" in stderr[0]
+    assert fake_slicer.calls == []
+
+
 def test_an_output_that_is_a_directory_is_caught_before_slicing(fake_slicer, tmp_path, capsys):
     existing = tmp_path / "out"
     existing.mkdir()

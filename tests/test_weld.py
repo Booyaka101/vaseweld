@@ -88,7 +88,8 @@ def test_snapping_is_reported_when_it_happens(ps_normal, ps_vase):
     assert result.summary()[0] == "requested Z=12.500 is between layers, snapping down"
 
 
-@pytest.mark.parametrize("cut", [0.2, 0.35, 40.2, -1.0])
+# nan compares False against both ends, so a pair of one-sided tests would let it through
+@pytest.mark.parametrize("cut", [0.2, 0.35, 40.2, -1.0, float("nan"), float("inf")])
 def test_cut_outside_the_range_names_the_range(ps_normal, ps_vase, cut):
     with pytest.raises(WeldError) as excinfo:
         weld(ps_normal, ps_vase, cut)
