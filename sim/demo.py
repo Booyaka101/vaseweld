@@ -129,6 +129,9 @@ Open one and drag the slider past a weld.</p>
 __CARDS__
 <p class="sub" style="margin-top:22px">Rebuild all of this from a fresh clone with
 <code>python sim/demo.py</code>. Nothing to install.</p>
+<p class="sub">These three use the two slices committed to the repo. With PrusaSlicer 2.9.x on the
+machine, <code>vaseweld auto vase.3mf --at 6.2 -o hybrid.gcode</code> does both slicing passes and
+the weld in one command, so you never handle the intermediate files.</p>
 </html>
 """
 

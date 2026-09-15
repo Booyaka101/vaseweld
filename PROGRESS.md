@@ -1,6 +1,7 @@
 # PROGRESS
 
-vaseweld 1.3.0, published. `pip install vaseweld`, or
+vaseweld 1.4.0 is built and green locally, not published. 1.3.0 is the live release:
+`pip install vaseweld`, or
 [the release](https://github.com/Booyaka101/vaseweld/releases/tag/v1.3.0) for the exe and the
 standalone script. Demo at https://booyaka101.github.io/vaseweld/. Announced on
 [PrusaSlicer #3204](https://github.com/prusa3d/PrusaSlicer/issues/3204#issuecomment-5551899954).
@@ -8,6 +9,66 @@ standalone script. Demo at https://booyaka101.github.io/vaseweld/. Announced on
 A stranger can see it work without installing anything: `vaseweld preview` writes a self-contained
 HTML page of the real toolpath, `python sim/demo.py` builds three of them plus an index from a fresh
 clone, and `.github/workflows/pages.yml` publishes that to GitHub Pages.
+
+## 1.4.0: `vaseweld auto`
+
+`vaseweld auto project.3mf --at 6.0 -o hybrid.gcode` runs both slicing passes itself and welds them,
+so nobody has to slice the same plate twice by hand. It drives PrusaSlicer 2.9.x only.
+
+Everything below was executed on this machine against a real PrusaSlicer 2.9.6, not inferred.
+
+- **The brief's mechanism claim was wrong for 2.9.6, and the argv it specified is still right.** The
+  brief said the six companion keys the GUI toggles alongside spiral vase are all needed because
+  libslic3r does not apply them headless. Measured:
+  - `DynamicPrintConfig::normalize_fdm` (`PrintConfig.cpp:5523-5537`) already forces `perimeters=1`,
+    `top_solid_layers=0` and `fill_density=0` whenever `spiral_vase` is on. Those three overrides are
+    redundant.
+  - `PrintConfig::validate` (`PrintConfig.cpp:5868-5881`) hard-rejects spiral vase together with
+    `support_material` or `support_material_enforce_layers>0`:
+    "Error: The composite configation is not valid: Spiral vase mode is not compatible with support
+    material", exit 1, no file written. Those two overrides turn a hard failure into a working slice
+    for anyone whose profile has supports on.
+  - `thin_walls` is the only key nothing upstream corrects. `--spiral-vase=1 --thin-walls=0`
+    reproduces the full companion set byte for byte; `--spiral-vase=1` alone differs by 16 lines and
+    586 bytes.
+  All seven flags are still passed, for the reasons above rather than the reason the brief gave.
+- **PrusaSlicer 2.9.6 has no `--version`.** It exits 1 and prints the banner on stdout. `--help` is
+  the only way to read the version, which is what `probe_slicer` does.
+- **PrusaSlicer exits 0 on a failed slice and writes nothing.** "All objects are outside of the
+  print volume" is exit 0. The return code proves nothing, so `run_slice` checks the output file
+  exists and reports the last non-progress line PrusaSlicer printed when it does not.
+- **PrusaSlicer's CLI `--export-3mf` never writes `Metadata/Slic3r_PE.config`**, not even with
+  `--load`. A project exported that way carries the mesh and its bed position and no print settings,
+  and slices at the built-in 0.3 mm default. That is why `examples/vase.3mf` slices at 0.3 mm, and
+  it is documented in both `examples/README.md` and `tests/fixtures/README.md` rather than hidden.
+- **The worked example runs.** `vaseweld auto examples/vase.3mf --at 6.0 -o vase-hybrid.gcode`
+  resolved PrusaSlicer off `PATH`, ran both passes, found 133 layers at 0.300 mm from Z 0.350 to
+  39.950, snapped the cut down to Z=5.750 (layer 19) and wrote 21294 lines. `vaseweld check` on the
+  result is OK.
+- **With no PrusaSlicer it exits 2** with exactly
+  `PrusaSlicer not found. Pass --slicer-path, or install it from https://www.prusa3d.com/prusaslicer/`.
+  Confirmed on this machine, where the only PrusaSlicer is a portable build outside every standard
+  location.
+- **211 tests, 210 pass and one is skipped** unless `VASEWELD_E2E=1`. That one drives the real
+  binary end to end; it passes here with `VASEWELD_SLICER` pointed at the portable build. 161 of the
+  211 predate this release and still pass unchanged.
+- **The published artefact was run, not just built.** `python -m build --wheel`, installed into a
+  fresh venv, and `vaseweld auto examples/vase.3mf --at 6.0` run through the console entry point
+  produced the same 21294-line file, which `vaseweld check` passes.
+- **The shared-code extraction changed nothing.** `_add_weld_options`, `_reject_bgcode_output`,
+  `_weld_files`, `_ladder` and `_ladder_report` were pulled out of `_run_weld` and `_run_layers` so
+  `auto` reuses them instead of cloning them. `tools/baseline.py` records `weld`, `check` and
+  `layers` over the whole fixture matrix, 97 files: 25 welded G-code files and 72 CLI transcripts.
+  Before and after the extraction they are identical byte for byte. Re-recorded after the version
+  bump, the 25 welded files differ by exactly one line each, the `; vaseweld 1.4.0` provenance
+  comment, and all 72 transcripts still match.
+- **Clone check.** difflib over the line lists of every new function against all 108 functions in
+  the package. The first pass put `probe_slicer` against `run_slice` at 38.2%: both built the same
+  six-keyword `subprocess.run` call, and the review pass had just added `stdin=DEVNULL` to each of
+  them by hand, which is exactly the drift the rule is there to catch. The call moved into
+  `_capture` and each caller kept its own timeout message. The highest similarity anywhere is now
+  26.1%, `slicer_argv` against `run_slice`, which share only the argv they pass. Nothing else
+  clears 24%.
 
 ## Verified working
 
@@ -26,8 +87,9 @@ Every claim below was executed on this machine, not inferred.
 - **Three delivery paths, byte-identical output.** Wheel installed into a clean venv, standalone
   `vaseweld.py`, and a PyInstaller `vaseweld.exe` built and run on Windows. All three produced
   sha256 `5c03b42c1bf4ac10...` for the same weld.
-- **138 tests pass** with `python -m pytest`, about 30 seconds. That includes a matrix that welds
-  all three slicers in both directions at two cut heights and runs `check` on every result.
+- **The suite passes** with `python -m pytest`, 209 tests in about 45 seconds. That includes a
+  matrix that welds all three slicers in both directions at two cut heights and runs `check` on
+  every result.
 - **Three slicers, both directions, two cut heights.** All twelve welds pass `vaseweld check`.
 - **A real printer firmware accepts the output.** `sim/` builds Klipper for its `linux` MCU target
   in Docker and runs `klippy` in batch mode, which plans every move through the real cartesian
@@ -112,20 +174,28 @@ green against PrusaSlicer alone.
 
 ## Shipping steps for the owner
 
-1. ~~Push local `main` to a public `Booyaka101/vaseweld`.~~ Done, CI green across
-   Linux/macOS/Windows on Python 3.10 to 3.13.
-2. Print the hybrid, photograph it, replace `docs/weld-preview.png` as the lead image (keep the
-   render lower down, it explains the mechanism). **This is the only shipping step still open.**
-3. ~~`python -m build && python -m twine upload dist/*` for PyPI.~~ Done, 1.3.0 is live.
-   `pip install vaseweld` from a clean venv produces byte-identical output to the local wheel.
-4. ~~Tag and release.~~ Done. `v1.3.0` was cut on `26155da` with all 16 checks green, and the
-   release carries the exe, wheel, sdist and standalone `vaseweld.py`.
-5. ~~Enable GitHub Pages.~~ Done, the demo is live at https://booyaka101.github.io/vaseweld/ and rebuilds on every push.
-6. ~~Comment on [PrusaSlicer #3204](https://github.com/prusa3d/PrusaSlicer/issues/3204).~~ Posted
-   as [#issuecomment-5551899954](https://github.com/prusa3d/PrusaSlicer/issues/3204#issuecomment-5551899954).
-   It leads with not owning a printer and ends by asking someone to run one, which is the honest
-   position and the thing most likely to get a reply worth having. The r/3Dprinting and r/prusa3d
-   posts come after, with a print in hand.
+1.4.0 is on the local branch `auto-slice`, not pushed. Nothing here has touched the network.
+
+1. Push `auto-slice` and open the PR against `main`. The branch carries the `auto` command, the two
+   new modules, three new test files, two new 3MF fixtures, `examples/vase.3mf`, the version bump
+   and the changelog entry.
+2. Wait for CI green on the head commit, checked through that commit's check-runs API rather than
+   `gh run watch`. The end-to-end test skips on CI, which has no PrusaSlicer; that is deliberate.
+3. Merge, then `python -m build && python -m twine upload dist/*`.
+4. Tag `v1.4.0` on the merge commit and attach the exe, wheel, sdist and standalone `vaseweld.py`.
+5. Post the reply drafted in `docs/draft-3204-reply.md` on
+   [PrusaSlicer #3204](https://github.com/prusa3d/PrusaSlicer/issues/3204). It answers greenveg
+   directly and asks again for someone to print one. The bot auto-closes legacy issues around
+   2026-09-23, so this wants posting before then.
+6. Still open from 1.3.0: print the hybrid, photograph it, replace `docs/weld-preview.png` as the
+   lead image and keep the render lower down where it explains the mechanism. The r/3Dprinting and
+   r/prusa3d posts come after, with a print in hand.
+
+Done in earlier releases: the public repo with CI green across Linux/macOS/Windows on Python 3.10
+to 3.13; PyPI, where `pip install vaseweld` from a clean venv produces byte-identical output to the
+local wheel; the `v1.3.0` release on `26155da` with all 16 checks green; GitHub Pages at
+https://booyaka101.github.io/vaseweld/, rebuilt on every push; and the 1.3.0 announcement on #3204
+as [#issuecomment-5551899954](https://github.com/prusa3d/PrusaSlicer/issues/3204#issuecomment-5551899954).
 
 ## Added in 1.1.0
 
@@ -138,6 +208,23 @@ green against PrusaSlicer alone.
 
 ## Next steps, in the order they are worth doing
 
+- **A cut nobody has to choose.** `--at` still wants a number. `auto` has both slices and the mesh,
+  so it could suggest one: the lowest Z where the cross-section stops changing much, which is where
+  a vase body can start without the spiral having to chase a shape. Print it as a hint first and
+  only then consider `--at auto`, because a wrong automatic cut is worse than no automatic cut.
+- **`--set KEY=VALUE`, repeatable, appended to both passes.** Today the only way to steer a slice is
+  `--load INI`, which means writing a file to change one number. PrusaSlicer takes every config key
+  as a flag, so this is a small change. It was left out of 1.4.0 rather than shipped untested next
+  to a release: it needs a refusal for keys in `SPIRAL_VASE_OVERRIDES`, which the vase pass has to
+  own.
+- **Drive OrcaSlicer and BambuStudio.** Both weld fine today, they just have to be sliced by hand.
+  Their CLIs take `--slice` plus a settings JSON rather than per-key flags, so the spiral companion
+  set becomes a JSON patch instead of seven arguments. Needs its own version gate and its own
+  fixtures.
+- **A PrusaSlicer 3.x gate that means something.** The current one refuses on the series number
+  because 3.0.0-alpha11 refactored the argument parser, which is honest but blunt. When a 3.x
+  release exists, run the fixture matrix against it and either widen `VERIFIED_SERIES` or record
+  exactly what broke.
 - **Cura.** `parser.py` already recognises Cura's `;LAYER:` markers, but Cura writes no config block,
   so `compat.py` would fall back to the first-layer footprint alone, and there is no Cura fixture.
   Do not claim Cura support until there is one.

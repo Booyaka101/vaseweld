@@ -5,12 +5,22 @@ from __future__ import annotations
 import argparse
 import os
 import sys
+import tempfile
 from pathlib import Path
 
 from . import __version__
 from .compat import CompatError, check_compatible
-from .parser import GcodeError, parse_file
+from .parser import GcodeError, GcodeFile, parse_file
+from .preflight import PreflightError, check_plate
 from .preview import write as write_preview
+from .slicer import (
+    SPIRAL_VASE_OVERRIDES,
+    SlicerError,
+    find_slicer,
+    probe_slicer,
+    run_slice,
+    version_complaint,
+)
 from .validate import check as run_check
 from .weld import WeldError, weld
 
@@ -18,7 +28,11 @@ EXIT_OK = 0
 EXIT_PROBLEMS = 1
 EXIT_USAGE = 2
 
-_EPILOG = r"""Slice the same plate twice, once with Spiral Vase off and once on, then:
+_EPILOG = r"""With PrusaSlicer installed, one command does the whole job:
+
+  vaseweld auto project.3mf --at 12.4 -o out.gcode
+
+Or slice the same plate twice yourself, once with Spiral Vase off and once on, then:
 
   vaseweld layers body.gcode
   vaseweld weld --normal base.gcode --vase body.gcode --at 12.4 -o out.gcode
@@ -38,6 +52,53 @@ let it append the temporary file path:
 """
 
 
+def _add_weld_options(cmd: argparse.ArgumentParser) -> None:
+    """Options that mean the same thing to `weld` and to `auto`."""
+    cmd.add_argument(
+        "--at",
+        required=True,
+        type=float,
+        metavar="Z",
+        action="append",
+        help="cut height in mm; repeat it to alternate again, so two cuts give a "
+        "solid base, a vase body and a solid lid",
+    )
+    cmd.add_argument(
+        "--vase-first",
+        action="store_true",
+        help="start with the vase part below the first cut instead of the normal part",
+    )
+    cmd.add_argument(
+        "--start-flow",
+        type=float,
+        metavar="RATIO",
+        help="flow ratio the vase transition layer ramps up from "
+        "(default: spiral_starting_flow_ratio from the vase file, else 0.8)",
+    )
+    cmd.add_argument(
+        "--finish-flow",
+        type=float,
+        metavar="RATIO",
+        help="flow ratio the last vase layer ramps down to "
+        "(default: spiral_finishing_flow_ratio from the vase file, else 0.25)",
+    )
+    cmd.add_argument(
+        "--no-seam-retract",
+        action="store_true",
+        help="do not retract before the seam travel; the retraction state is still matched",
+    )
+    cmd.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="report the plan and write nothing",
+    )
+    cmd.add_argument(
+        "--force",
+        action="store_true",
+        help="weld even if the two files disagree on printer or plate settings",
+    )
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="vaseweld",
@@ -55,15 +116,6 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     weld_cmd.add_argument("--normal", type=Path, help="the non-vase slice")
     weld_cmd.add_argument("--vase", type=Path, help="the spiral vase slice")
-    weld_cmd.add_argument(
-        "--at",
-        required=True,
-        type=float,
-        metavar="Z",
-        action="append",
-        help="cut height in mm; repeat it to alternate again, so two cuts give a "
-        "solid base, a vase body and a solid lid",
-    )
     weld_cmd.add_argument("-o", "--output", type=Path, help="file to write")
     weld_cmd.add_argument(
         "gcode",
@@ -72,39 +124,61 @@ def _build_parser() -> argparse.ArgumentParser:
         help="the file a slicer post-processing hook just produced; it takes whichever "
         "of --normal or --vase you left out, and is rewritten in place unless -o is given",
     )
-    weld_cmd.add_argument(
-        "--vase-first",
-        action="store_true",
-        help="start with the vase part below the first cut instead of the normal part",
+    _add_weld_options(weld_cmd)
+
+    auto_cmd = sub.add_parser(
+        "auto",
+        help="slice a project twice with PrusaSlicer and weld the result",
+        description="Slice one project twice with PrusaSlicer, normal and spiral vase, "
+        "and weld them. Needs PrusaSlicer 2.9.x on the machine.",
     )
-    weld_cmd.add_argument(
-        "--start-flow",
+    auto_cmd.add_argument(
+        "project",
+        type=Path,
+        help="a .3mf project, or any model file PrusaSlicer opens (.stl, .obj, .step)",
+    )
+    auto_cmd.add_argument(
+        "-o",
+        "--output",
+        type=Path,
+        help="file to write (default: PROJECT-vaseweld.gcode beside the project)",
+    )
+    _add_weld_options(auto_cmd)
+    auto_cmd.add_argument(
+        "--load",
+        type=Path,
+        action="append",
+        metavar="INI",
+        help="a PrusaSlicer config .ini to slice with; repeat it to layer several. "
+        "Required for a bare model file unless PrusaSlicer's built-in defaults will do",
+    )
+    auto_cmd.add_argument(
+        "--slicer-path",
+        type=Path,
+        metavar="PATH",
+        help="the PrusaSlicer binary, if it is not on PATH or in a standard install dir",
+    )
+    auto_cmd.add_argument(
+        "--force-slicer-version",
+        action="store_true",
+        help="run against a PrusaSlicer version auto is not verified on",
+    )
+    auto_cmd.add_argument(
+        "--slicer-timeout",
         type=float,
-        metavar="RATIO",
-        help="flow ratio the vase transition layer ramps up from "
-        "(default: spiral_starting_flow_ratio from the vase file, else 0.8)",
+        metavar="SECONDS",
+        help="give up on a slicing pass after this long (default: wait)",
     )
-    weld_cmd.add_argument(
-        "--finish-flow",
-        type=float,
-        metavar="RATIO",
-        help="flow ratio the last vase layer ramps down to "
-        "(default: spiral_finishing_flow_ratio from the vase file, else 0.25)",
+    auto_cmd.add_argument(
+        "--keep-slices",
+        type=Path,
+        metavar="DIR",
+        help="write the two intermediate slices here instead of a temporary directory",
     )
-    weld_cmd.add_argument(
-        "--no-seam-retract",
+    auto_cmd.add_argument(
+        "--verbose",
         action="store_true",
-        help="do not retract before the seam travel; the retraction state is still matched",
-    )
-    weld_cmd.add_argument(
-        "--dry-run",
-        action="store_true",
-        help="report the plan and write nothing",
-    )
-    weld_cmd.add_argument(
-        "--force",
-        action="store_true",
-        help="weld even if the two files disagree on printer or plate settings",
+        help="print each PrusaSlicer command line and everything it prints",
     )
 
     preview_cmd = sub.add_parser(
@@ -139,6 +213,17 @@ def _validate_flow(name: str, value: float | None) -> None:
         raise WeldError(f"{name} must be between 0 and 1, got {value}")
 
 
+def _reject_bgcode_output(output: Path) -> None:
+    if output.suffix.lower() != ".bgcode":
+        return
+    raise WeldError(
+        f"{output}: vaseweld reads binary G-code but cannot write it. "
+        "Give -o a .gcode name, or turn off 'Supports binary G-code' in "
+        "Print Settings > Output options on the profile that runs this hook. "
+        "Printers that take .bgcode take plain G-code too."
+    )
+
+
 def _resolve_inputs(args: argparse.Namespace) -> tuple[Path, Path, Path]:
     """Work out the two inputs and the destination, honouring a trailing hook file."""
     normal, vase, output = args.normal, args.vase, args.output
@@ -160,13 +245,7 @@ def _resolve_inputs(args: argparse.Namespace) -> tuple[Path, Path, Path]:
         )
     if output is None:
         raise WeldError("no destination: pass -o/--output")
-    if output.suffix.lower() == ".bgcode":
-        raise WeldError(
-            f"{output}: vaseweld reads binary G-code but cannot write it. "
-            "Give -o a .gcode name, or turn off 'Supports binary G-code' in "
-            "Print Settings > Output options on the profile that runs this hook. "
-            "Printers that take .bgcode take plain G-code too."
-        )
+    _reject_bgcode_output(output)
     return normal, vase, output
 
 
@@ -174,9 +253,17 @@ def _run_weld(args: argparse.Namespace, out: "object") -> int:
     _validate_flow("--start-flow", args.start_flow)
     _validate_flow("--finish-flow", args.finish_flow)
     normal_path, vase_path, output = _resolve_inputs(args)
+    return _weld_files(args, out, parse_file(normal_path), parse_file(vase_path), output)
 
-    normal = parse_file(normal_path)
-    vase = parse_file(vase_path)
+
+def _weld_files(
+    args: argparse.Namespace,
+    out: "object",
+    normal: GcodeFile,
+    vase: GcodeFile,
+    output: Path,
+) -> int:
+    """Weld two parsed files and report. Shared by `weld` and `auto`."""
     try:
         check_compatible(normal, vase)
     except CompatError as exc:
@@ -221,6 +308,111 @@ def _run_weld(args: argparse.Namespace, out: "object") -> int:
     return EXIT_OK
 
 
+def _ladder_divergence(normal: GcodeFile, vase: GcodeFile) -> str | None:
+    """Why these two slices cannot be welded, if their Z ladders are not the same one."""
+    a, b = _ladder(normal), _ladder(vase)
+    if a == b:
+        return None
+    head = (
+        "the two slices disagree about layer Z, so welding them would produce a "
+        "plausible-looking file that does not print. "
+    )
+    tail = " Re-run with --keep-slices to look at both passes."
+    for index, (left, right) in enumerate(zip(a, b), start=1):
+        if left != right:
+            return (
+                f"{head}Layer {index} is Z {left:.3f} in the normal pass and "
+                f"Z {right:.3f} in the spiral vase pass. "
+                "Adaptive or variable layer height does this; slice at a fixed layer height."
+                f"{tail}"
+            )
+    return (
+        f"{head}The normal pass has {len(a)} layers and the spiral vase pass {len(b)}, "
+        f"agreeing up to the shorter of the two.{tail}"
+    )
+
+
+class _SliceDir:
+    """Where the two passes land: a kept directory, or one that is cleaned up."""
+
+    def __init__(self, keep: Path | None) -> None:
+        self._keep = keep
+        self._temp: tempfile.TemporaryDirectory | None = None
+
+    def __enter__(self) -> Path:
+        if self._keep is not None:
+            try:
+                self._keep.mkdir(parents=True, exist_ok=True)
+            except OSError as exc:
+                raise GcodeError(
+                    f"{self._keep}: cannot use for --keep-slices ({exc.strerror or exc})"
+                ) from exc
+            return self._keep
+        self._temp = tempfile.TemporaryDirectory(prefix="vaseweld-")
+        return Path(self._temp.name)
+
+    def __exit__(self, *exc_info) -> None:
+        if self._temp is not None:
+            self._temp.cleanup()
+
+
+def _run_auto(args: argparse.Namespace, out: "object") -> int:
+    _validate_flow("--start-flow", args.start_flow)
+    _validate_flow("--finish-flow", args.finish_flow)
+    project: Path = args.project
+    output = args.output or project.with_name(f"{project.stem}-vaseweld.gcode")
+    _reject_bgcode_output(output)
+
+    load = tuple(args.load or ())
+    for config in load:
+        if not config.is_file():
+            raise SlicerError(f"{config}: no such config file. Check --load.")
+
+    plate = check_plate(project)
+    found = probe_slicer(find_slicer(args.slicer_path))
+    complaint = version_complaint(found)
+    if complaint is not None:
+        if complaint.fatal and not args.force_slicer_version:
+            raise SlicerError(f"{complaint.message} Pass --force-slicer-version to run anyway.")
+        print(f"warning: {complaint.message}", file=sys.stderr)
+
+    print(f"slicer: {found.path} ({found.version})", file=out)
+    print(plate.describe(), file=out)
+    echo = out if args.verbose else None
+
+    with _SliceDir(args.keep_slices) as workdir:
+        normal_path = workdir / f"{project.stem}-normal.gcode"
+        vase_path = workdir / f"{project.stem}-spiral.gcode"
+        for step, (destination, overrides, label) in enumerate(
+            (
+                (normal_path, (), "normal"),
+                (vase_path, SPIRAL_VASE_OVERRIDES, "spiral vase"),
+            ),
+            start=1,
+        ):
+            # a pass takes minutes; say so before blocking, even down a pipe
+            print(f"pass {step}/2 {label}", file=out, flush=True)
+            run_slice(
+                found,
+                project,
+                destination,
+                overrides=overrides,
+                load=load,
+                timeout=args.slicer_timeout,
+                echo=echo,
+            )
+
+        normal, vase = parse_file(normal_path), parse_file(vase_path)
+        divergence = _ladder_divergence(normal, vase)
+        if divergence is not None:
+            raise WeldError(divergence)
+        for line in _ladder_report(vase, project.name):
+            print(line, file=out)
+        if args.keep_slices is not None:
+            print(f"kept both slices in {workdir}", file=out)
+        return _weld_files(args, out, normal, vase, output)
+
+
 def _run_preview(args: argparse.Namespace, out: "object") -> int:
     destination = args.output or args.file.with_suffix(".html")
     try:
@@ -232,23 +424,30 @@ def _run_preview(args: argparse.Namespace, out: "object") -> int:
     return EXIT_OK
 
 
+def _ladder(gcode: GcodeFile) -> list[float]:
+    return [layer.z for layer in gcode.layers]
+
+
+def _ladder_report(gcode: GcodeFile, name: str | None = None) -> list[str]:
+    """What `layers` prints about a file, minus the per-layer listing."""
+    zs = _ladder(gcode)
+    steps = {round(b - a, 4) for a, b in zip(zs, zs[1:])}
+    lines = [f"{name or gcode.path.name}: {len(zs)} layers, Z {zs[0]:.3f} to {zs[-1]:.3f}"]
+    if len(steps) == 1:
+        lines.append(f"layer height: {next(iter(steps)):.3f} mm")
+    else:
+        lines.append(
+            f"layer height: varies, {min(steps):.3f} to {max(steps):.3f} mm. "
+            "Slice both files at a fixed layer height before welding."
+        )
+    lines.append(f"weldable range: Z {zs[1]:.3f} to {zs[-1]:.3f} (layers 2 to {len(zs)})")
+    return lines
+
+
 def _run_layers(args: argparse.Namespace, out: "object") -> int:
     gcode = parse_file(args.file)
-    zs = [layer.z for layer in gcode.layers]
-    steps = {round(b - a, 4) for a, b in zip(zs, zs[1:])}
-    print(f"{gcode.path.name}: {len(zs)} layers, Z {zs[0]:.3f} to {zs[-1]:.3f}", file=out)
-    if len(steps) == 1:
-        print(f"layer height: {next(iter(steps)):.3f} mm", file=out)
-    else:
-        print(
-            f"layer height: varies, {min(steps):.3f} to {max(steps):.3f} mm. "
-            "Slice both files at a fixed layer height before welding.",
-            file=out,
-        )
-    print(
-        f"weldable range: Z {zs[1]:.3f} to {zs[-1]:.3f} (layers 2 to {len(zs)})",
-        file=out,
-    )
+    for line in _ladder_report(gcode):
+        print(line, file=out)
     if args.all:
         for layer in gcode.layers:
             print(f"  layer {layer.index:4d}  Z {layer.z:.3f}", file=out)
@@ -269,12 +468,14 @@ def main(argv: list[str] | None = None, out: "object" = None) -> int:
     try:
         if args.command == "weld":
             return _run_weld(args, out)
+        if args.command == "auto":
+            return _run_auto(args, out)
         if args.command == "layers":
             return _run_layers(args, out)
         if args.command == "preview":
             return _run_preview(args, out)
         return _run_check(args, out)
-    except (GcodeError, CompatError, WeldError) as exc:
+    except (GcodeError, CompatError, WeldError, PreflightError, SlicerError) as exc:
         print(f"vaseweld: {exc}", file=sys.stderr)
         return EXIT_USAGE
     except KeyboardInterrupt:

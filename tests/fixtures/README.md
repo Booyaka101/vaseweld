@@ -1,6 +1,6 @@
 # Fixtures
 
-Every `.gcode` file here is real slicer output, not hand-written. Nothing in this directory is
+Every `.gcode` and `.3mf` file here is real slicer output, not hand-written. Nothing in this directory is
 shipped in the wheel; it exists so the tests run against files with the same quirks a user's files
 have.
 
@@ -27,6 +27,17 @@ The models are `examples/cylinder_40mm.stl` and `examples/cylinder_6mm.stl`, gen
 | `bambustudio_vase_40mm.gcode` | BambuStudio 02.08.02.61 | the same, spiral vase |
 | `binary_6mm.bgcode` | PrusaSlicer 2.9.6 | binary G-code, the text twin of `prusaslicer_normal_6mm.gcode` |
 | `binary_vase_6mm.bgcode` | PrusaSlicer 2.9.6 | the same, spiral vase, so a binary pair can be welded |
+| `cylinder_6mm.3mf` | PrusaSlicer 2.9.6 | a single-object project, what `auto` accepts |
+| `two_objects.3mf` | PrusaSlicer 2.9.6 | two copies of one object, refused before either slice |
+
+There is no committed multi-material project. `conftest.multi_material_3mf` derives one at test
+time by splitting `cylinder_6mm.3mf`'s single volume in two and giving each an `extruder` key,
+which is the only part of the file preflight reads. A real one would carry a second mesh too, and
+committing a second mesh to exercise a regex would overstate what is under test.
+
+PrusaSlicer's CLI `--export-3mf` never writes `Metadata/Slic3r_PE.config`, not even when you
+pass `--load`, so neither project carries print settings. They slice at PrusaSlicer's built-in
+defaults, which is all the tests need.
 
 ## Regenerating
 
@@ -75,6 +86,12 @@ $PS --export-gcode --layer-height 0.2 --first-layer-height 0.2 --duplicate 2 \
     --gcode-label-objects firmware --output two_objects_1mm.gcode cyl1.stl
 $PS --export-gcode --layer-height 0.2 --first-layer-height 0.2 --binary-gcode \
     --output binary_6mm.bgcode cyl6.stl
+
+# The projects `vaseweld auto` is tested against. Run these from examples/, so the object name
+# baked into the 3MF is the file name and not a path off this machine.
+$PS --export-3mf --center 125,105 --output ../tests/fixtures/cylinder_6mm.3mf cylinder_6mm.stl
+$PS --export-3mf --center 125,105 --duplicate 2 \
+    --output ../tests/fixtures/two_objects.3mf cylinder_6mm.stl
 ```
 
 BambuStudio takes the same shape of command as OrcaSlicer. The vase process profile is a copy of

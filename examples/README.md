@@ -11,6 +11,14 @@ slices of it at 0.2 mm layers, with Spiral Vase off and on. They are the two inp
                   --at 6.2 --at 30.2 -o hybrid.gcode
     vaseweld check hybrid.gcode
 
+`vase.3mf` is the same model as a project, for the `vaseweld auto` worked example:
+
+    vaseweld auto examples/vase.3mf --at 6.0 -o vase-hybrid.gcode
+
+PrusaSlicer's CLI does not write print settings into a `--export-3mf`, so that project carries the
+mesh and its place on the bed and nothing else, and slices at the built-in 0.3 mm default. A project
+saved from the PrusaSlicer window would carry your settings instead.
+
 `cylinder_40mm.stl` and `cylinder_6mm.stl` are the models the committed test fixtures were sliced
 from. A cylinder is the right shape for a fixture and the wrong one for a demo: constant radius
 means a bug in the weld has nowhere to hide, but it also means the output does not look like a vase.
@@ -18,5 +26,6 @@ means a bug in the weld has nowhere to hide, but it also means the output does n
 Regenerate any of them with:
 
     python tools/make_stl.py --shape vase -o vase_40mm.stl --rings 120 --segments 96
+    prusa-slicer-console.exe --export-3mf --center 125,105 --output vase.3mf vase_40mm.stl
     python tools/make_stl.py -o cylinder_40mm.stl
     python tools/make_stl.py -o cylinder_6mm.stl --height 6 --radius 8 --segments 48

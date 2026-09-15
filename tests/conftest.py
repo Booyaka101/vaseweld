@@ -1,18 +1,106 @@
 from __future__ import annotations
 
+import shutil
+import subprocess
+import zipfile
 from pathlib import Path
 
 import pytest
 
+import vaseweld.slicer
 from vaseweld.parser import parse_file
+from vaseweld.preflight import MODEL_CONFIG
 
+ROOT = Path(__file__).parent.parent
 FIXTURES = Path(__file__).parent / "fixtures"
+EXAMPLES = ROOT / "examples"
 
 
 def fixture(name: str) -> Path:
     path = FIXTURES / name
     assert path.exists(), f"missing fixture {name}"
     return path
+
+
+def example(name: str) -> Path:
+    path = EXAMPLES / name
+    assert path.exists(), f"missing example {name}"
+    return path
+
+
+def multi_material_3mf(tmp_path: Path) -> Path:
+    """cylinder_6mm.3mf with its one volume split across two extruders.
+
+    Derived rather than committed: a real multi-material project carries a second
+    mesh, and the only part preflight reads is the per-volume extruder key.
+    """
+    source, destination = fixture("cylinder_6mm.3mf"), tmp_path / "two_materials.3mf"
+    config = zipfile.ZipFile(source).read(MODEL_CONFIG).decode("utf-8")
+    start = config.index("  <volume")
+    end = config.index("  </volume>") + len("  </volume>\n")
+    volume = config[start:end]
+    halves = "".join(
+        volume.replace('firstid="0" lastid="191"', f'firstid="{first}" lastid="{last}"').replace(
+            "  </volume>",
+            f'   <metadata type="volume" key="extruder" value="{extruder}"/>\n  </volume>',
+        )
+        for extruder, first, last in ((1, 0, 95), (2, 96, 191))
+    )
+    shutil.copyfile(source, destination)
+    _replace_member(destination, MODEL_CONFIG, config[:start] + halves + config[end:])
+    return destination
+
+
+def _replace_member(archive_path: Path, name: str, text: str) -> None:
+    with zipfile.ZipFile(archive_path) as archive:
+        items = [(item, archive.read(item.filename)) for item in archive.infolist()]
+    with zipfile.ZipFile(archive_path, "w", zipfile.ZIP_DEFLATED) as out:
+        for item, data in items:
+            out.writestr(item, text.encode("utf-8") if item.filename == name else data)
+
+
+class FakePrusaSlicer:
+    """Stands in for the binary: answers --help with a banner, writes a fixture per pass.
+
+    Real PrusaSlicer is only present behind VASEWELD_E2E, so everything else drives
+    this instead. It records every argv it is handed, which is what the tests assert on.
+    """
+
+    BANNER = "PrusaSlicer-2.9.6 based on Slic3r (with GUI support)"
+
+    def __init__(self, path: Path) -> None:
+        self.path = path
+        self.banner = self.BANNER
+        self.normal = "prusaslicer_normal_6mm.gcode"
+        self.vase = "prusaslicer_vase_6mm.gcode"
+        self.returncode = 0
+        self.stderr = ""
+        self.calls: list[list[str]] = []
+
+    def __call__(self, argv, **kwargs):
+        argv = [str(part) for part in argv]
+        self.calls.append(argv)
+        if "--help" in argv:
+            return subprocess.CompletedProcess(
+                argv, 0, f"{self.banner}\nhttps://github.com/prusa3d/PrusaSlicer\n", ""
+            )
+        produce = self.vase if "--spiral-vase=1" in argv else self.normal
+        if produce is not None:
+            shutil.copyfile(fixture(produce), argv[argv.index("--output") + 1])
+        return subprocess.CompletedProcess(argv, self.returncode, "", self.stderr)
+
+    @property
+    def slices(self) -> list[list[str]]:
+        return [argv for argv in self.calls if "--help" not in argv]
+
+
+@pytest.fixture
+def fake_slicer(monkeypatch, tmp_path):
+    fake = FakePrusaSlicer(tmp_path / "bin" / "prusa-slicer-console.exe")
+    fake.path.parent.mkdir(parents=True, exist_ok=True)
+    fake.path.write_text("stand-in for prusa-slicer\n", encoding="utf-8")
+    monkeypatch.setattr(vaseweld.slicer.subprocess, "run", fake)
+    return fake
 
 
 @pytest.fixture(scope="session")

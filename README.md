@@ -57,8 +57,50 @@ you would rather not have Python at all.
 
 ## Usage
 
-Slice the same plate twice in PrusaSlicer, OrcaSlicer or BambuStudio. Once with Spiral Vase off,
-once with it on. Do not move, rescale or reorient the object in between. Save both files, then:
+With PrusaSlicer 2.9.x on the machine, one command does the whole job. It slices your project
+twice, once with Spiral Vase off and once on, and welds the two:
+
+```
+$ vaseweld auto examples/vase.3mf --at 6.0 -o vase-hybrid.gcode
+slicer: D:\tmp\slicers\PrusaSlicer-2.9.6\prusa-slicer-console.exe (2.9.6)
+vase.3mf: 1 object
+pass 1/2 normal
+pass 2/2 spiral vase
+note: removed the printing time estimate, which cannot be recomputed from these two files
+vase.3mf: 133 layers, Z 0.350 to 39.950
+layer height: 0.300 mm
+weldable range: Z 0.650 to 39.950 (layers 2 to 133)
+requested Z=6.000 is between layers, snapping down
+cut snapped to Z=5.750 (layer 19)
+normal: layers 1-18 (Z 0.350-5.450)
+vase: layers 19-133 (Z 5.750-39.950)
+E mode: absolute -> relative (converted)
+transition ramp: 0.80 -> 1.00 over layer 19
+wrote vase-hybrid.gcode (21294 lines)
+```
+
+The first line is wherever PrusaSlicer lives on the machine that ran it; that one was a portable
+build on `PATH`. vaseweld also looks in the usual install directories, and takes `--slicer-path`
+when it is somewhere else.
+
+A project saved from PrusaSlicer carries its own print settings, so nothing else is needed. That
+one does not: `examples/vase.3mf` was exported from the command line, so it holds the mesh and its
+place on the bed and nothing more, which is why it sliced at PrusaSlicer's built-in 0.3 mm default
+rather than anything you would choose. For a project like that, or for a bare `.stl` or `.step`,
+point `--load` at an exported PrusaSlicer config and repeat it to layer several:
+
+```
+vaseweld auto vase.stl --load print.ini --load printer.ini --at 6.0 -o hybrid.gcode
+```
+
+The spiral pass is not just `--spiral-vase`. PrusaSlicer's GUI turns off perimeters, top layers,
+infill, supports and thin walls alongside it, from a dialog that never runs headless, so `auto`
+passes the whole set on the command line. Slicing by hand with only the checkbox gives a slightly
+different toolpath.
+
+Without PrusaSlicer, or with OrcaSlicer or BambuStudio, slice the same plate twice yourself. Once
+with Spiral Vase off, once with it on. Do not move, rescale or reorient the object in between. Save
+both files, then:
 
 ```
 $ vaseweld weld --normal base.gcode --vase body.gcode --at 6.2 -o hybrid.gcode
@@ -323,6 +365,21 @@ FAIL: 1 problem in broken.gcode
                        and what that does to the seam
 ```
 
+`vaseweld auto` takes a project instead of two slices, plus everything above except `--normal`
+and `--vase`, plus:
+
+```
+--load INI             a PrusaSlicer config to slice with; repeat to layer several
+--slicer-path PATH     the PrusaSlicer binary, if it is not on PATH or a standard install
+--force-slicer-version run against a version auto is not verified on
+--slicer-timeout SECS  give up on a pass after this long
+--keep-slices DIR      keep the two intermediate slices instead of using a temp dir
+--verbose              print each PrusaSlicer command line and everything it prints
+```
+
+`-o` defaults to `PROJECT-vaseweld.gcode` beside the project. `--dry-run` still slices twice,
+since the plan depends on what came out; it just does not write the welded file.
+
 ## Limitations
 
 These are out of scope for 1.0, not bugs:
@@ -331,7 +388,9 @@ These are out of scope for 1.0, not bugs:
 - Single object, single material. This is the same constraint PrusaSlicer's own validator enforces,
   and vaseweld quotes it back at you: "The Spiral Vase option can only be used when printing single
   material objects."
-- vaseweld does not slice. You bring both files.
+- `vaseweld auto` drives PrusaSlicer 2.9.x and nothing else. OrcaSlicer and BambuStudio take a
+  different command line and expose settings as profile JSON rather than flags, so with those you
+  slice twice yourself and use `vaseweld weld`. Their output welds just as well.
 - The printing time estimate can only be recomputed when the files carry `M73` remaining times,
   which PrusaSlicer emits only with "Supports remaining times" enabled. Otherwise the estimate is
   stripped.
@@ -346,7 +405,9 @@ cd vaseweld
 python -m pytest
 ```
 
-138 tests, about 40 seconds, no dependencies beyond pytest. Everything runs against real slicer
+209 tests, about 45 seconds, no dependencies beyond pytest. One of them drives a real PrusaSlicer
+end to end and is skipped unless you set `VASEWELD_E2E=1`, so a machine without the slicer still
+runs the rest. Everything else runs against real slicer
 output committed under `tests/fixtures/`, produced by driving PrusaSlicer 2.9.6, OrcaSlicer 2.4.2
 and BambuStudio 02.08.02.61 from the command line over the models in `examples/`. See
 [tests/fixtures/README.md](tests/fixtures/README.md) for the exact commands.

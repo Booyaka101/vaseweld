@@ -11,7 +11,18 @@ import ast
 import re
 from pathlib import Path
 
-MODULES = ("__init__", "bgcode", "parser", "compat", "weld", "validate", "preview", "cli")
+MODULES = (
+    "__init__",
+    "bgcode",
+    "parser",
+    "compat",
+    "slicer",
+    "preflight",
+    "weld",
+    "validate",
+    "preview",
+    "cli",
+)
 
 HEADER = '''\
 #!/usr/bin/env python3
