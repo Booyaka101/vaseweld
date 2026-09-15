@@ -56,7 +56,9 @@ def project_3mf(tmp_path: Path, name: str, **settings: str) -> Path:
     """cylinder_6mm.3mf carrying a print config, the way a project saved from the GUI does.
 
     Headless PrusaSlicer never writes this member, so it cannot be produced by the
-    binary. The "; key = value" shape is the one 2.9.6 reads back.
+    binary. The "; key = value" shape is the one 2.9.6 reads back, and the generator
+    line matters: 2.9.6 skips the first line of this member, so a setting written
+    there is silently ignored.
     """
     destination = tmp_path / name
     shutil.copyfile(fixture("cylinder_6mm.3mf"), destination)

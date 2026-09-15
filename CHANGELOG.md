@@ -29,20 +29,25 @@
   command line, so an ini holding `perimeters = 3`, `top_solid_layers = 5`, `fill_density = 20%`
   still sliced its normal pass at `1`, `0`, `0%` with 0 perimeter and 0 infill sections: a hollow
   single-wall base, which is the one thing the weld exists to avoid. Layer-change retraction goes
-  the same way, worth 200 retractions against 2 on a profile that does not already retract before
-  travel. `auto` now reads the project's own print settings, layers any `--load` ini over them the
-  way PrusaSlicer does, and hands those four values back explicitly. A `.3mf` project's embedded
-  settings turn out not to be clobbered like this, so for a project the overrides hand back what
-  the file already said. Where the project was saved after accepting PrusaSlicer's "shall I adjust
-  those settings" dialog the originals are gone from the file, and `auto` says so rather than
-  pretending otherwise. As a backstop it also reads `spiral_vase` back out of both sliced files and
-  refuses to weld two passes that came out in the same mode.
+  the same way at both the printer and the filament level, worth a retraction at every layer change
+  on a profile that does not already retract before travel. `auto` now reads the project's own print
+  settings, layers any `--load` ini over them the way PrusaSlicer does, and hands those five values
+  back explicitly, which reproduces a plain non-vase slice line for line. A `.3mf` project's
+  embedded settings turn out not to be clobbered like this, so for a project the overrides hand back
+  what the file already said. Where the project was saved after accepting PrusaSlicer's "shall I
+  adjust those settings" dialog the originals are gone from the file, and `auto` says so rather
+  than pretending otherwise. As a backstop it also reads `spiral_vase` back out of both sliced
+  files and refuses to weld two passes that came out in the same mode.
 - A plate is counted the way PrusaSlicer counts it. Objects parked as not printable are not on the
   plate, and volume extruder `0` means "inherit the object's extruder" rather than a second
-  material, so neither is refused any more. A volume left at `0` next to one assigned to extruder 2
-  is still two materials and is still refused.
+  material, so neither is refused any more. A volume left at `0`, or carrying no extruder key at
+  all, next to one assigned to extruder 2 is still two materials and is still refused. Reading the
+  plate streams the model rather than holding it: a 200 MB mesh cost about 450 MB of memory to
+  find one tag at the end of the file, and now costs about 6 MB.
 - `--slicer-path` accepts a macOS `.app` bundle, not just the binary buried inside it, and the
-  error for a directory with no slicer in it names something that exists on your platform.
+  error for a directory with no slicer in it names something that exists on your platform. Where
+  several versions are installed side by side, the newest is tried first by version number rather
+  than by name, so 2.10.0 will outrank 2.9.6 when it ships.
 - `--verbose` prints the exact command line each pass runs, quoted for your shell, before the output
   of that pass. `--keep-slices DIR` keeps both intermediate slices instead of using a temp dir, which
   is what the Z-ladder abort tells you to reach for, unless you already passed it, in which case the

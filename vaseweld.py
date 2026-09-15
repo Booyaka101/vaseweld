@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import argparse
 import bisect
+import io
 import json
 import math
 import os
@@ -27,6 +28,7 @@ import sys
 import tempfile
 import zipfile
 import zlib
+from collections.abc import Iterable
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import NamedTuple
@@ -1019,20 +1021,22 @@ SPIRAL_VASE_OVERRIDES = (
 # so nothing downstream notices, and the "solid base" is a single wall.
 NORMAL_OVERRIDES = ("--spiral-vase=0",)
 
-# ...but turning the mode off is not always enough. normalize_fdm() forces these four the
+# ...but turning the mode off is not always enough. normalize_fdm() forces these five the
 # moment it sees spiral_vase, and when spiral_vase arrives through --load it runs before the
 # command line overrides land, so --spiral-vase=0 leaves them forced. Measured on 2.9.6: an
 # ini holding perimeters=3/top_solid_layers=5/fill_density=20% slices at 1/0/0%, one wall and
 # no infill. A 3MF's embedded config is *not* clobbered this way, so for a project these are
-# a no-op that hands back what the file already said. retract_layer_change is worth the
-# fourth slot even though most profiles retract at a layer change anyway: with
-# retract_before_travel high enough that they do not, losing it drops 200 retractions to 2.
-# Fallbacks are 2.9.6's own defaults, for a config that never named the key.
+# a no-op that hands back what the file already said. Both retraction keys matter: the filament
+# one overrides the printer one where it is set, and losing either drops a retraction at every
+# layer change. Handing all five back reproduces a plain slice line for line.
+# A None default is a nullable filament override, which has no command line spelling for "unset",
+# so it goes back only when the config named it. The rest are 2.9.6's own defaults.
 VASE_CLOBBERED = (
     ("perimeters", "3"),
     ("top_solid_layers", "3"),
     ("fill_density", "20%"),
     ("retract_layer_change", "0"),
+    ("filament_retract_layer_change", None),
 )
 
 VERIFIED_SERIES = (2, 9)
@@ -1045,6 +1049,7 @@ _EXE_NAMES = ("prusa-slicer-console.exe", "prusa-slicer", "prusa-slicer.exe", "P
 # --slicer-path at a .app is the natural thing to try on macOS; the binary is buried in it.
 _BUNDLE_BINARY = "Contents/MacOS/PrusaSlicer"
 _PROBE_TIMEOUT = 60.0
+_NUMBERS = re.compile(r"[0-9]+")
 # A project's embedded config uses the G-code footer's "; key = value". An ini does not, and
 # there ";" starts a comment, so one regex for both would read commented-out lines as live.
 _PROJECT_SETTING = re.compile(r"^;\s*([a-z][a-z0-9_]*)\s*=\s*(.*?)\s*$")
@@ -1080,6 +1085,15 @@ class Slicer:
         return None if self.release is None else self.release[:2]
 
 
+def _newest_first(paths: Iterable[Path]) -> list[Path]:
+    """Install dirs and AppImages, newest first. String order puts 2.9.6 above 2.10.0."""
+
+    def version(path: Path) -> list[int]:
+        return [int(n) for n in _NUMBERS.findall(path.name)]
+
+    return sorted(paths, key=version, reverse=True)
+
+
 def _windows_candidates() -> list[Path]:
     roots = [
         os.environ.get("ProgramFiles", r"C:\Program Files"),
@@ -1093,7 +1107,7 @@ def _windows_candidates() -> list[Path]:
             continue
         base = Path(root)
         for pattern in ("Prusa3D/PrusaSlicer*", "PrusaSlicer*"):
-            for directory in sorted(base.glob(pattern), reverse=True):
+            for directory in _newest_first(base.glob(pattern)):
                 found.append(directory / "prusa-slicer-console.exe")
                 found.append(directory / "prusa-slicer.exe")
     return found
@@ -1115,7 +1129,7 @@ def _linux_candidates() -> list[Path]:
         home / ".local/share/flatpak/exports/bin/com.prusa3d.PrusaSlicer",
         home / ".local/bin/prusa-slicer",
     ]
-    images = sorted((home / "Applications").glob("PrusaSlicer*.AppImage"), reverse=True)
+    images = _newest_first((home / "Applications").glob("PrusaSlicer*.AppImage"))
     return fixed + list(images)
 
 
@@ -1284,7 +1298,9 @@ def normal_overrides(config: dict[str, str]) -> tuple[str, ...]:
     if not _vase_is_on(config):
         return NORMAL_OVERRIDES
     restored = tuple(
-        f"--{key.replace('_', '-')}={config.get(key) or default}" for key, default in VASE_CLOBBERED
+        f"--{key.replace('_', '-')}={config.get(key) or default}"
+        for key, default in VASE_CLOBBERED
+        if default is not None or config.get(key)
     )
     return NORMAL_OVERRIDES + restored
 
@@ -1393,13 +1409,14 @@ def _last_meaningful_line(text: str) -> str:
 
 MODEL_CONFIG = "Metadata/Slic3r_PE_model.config"
 MODEL_FILE = "3D/3dmodel.model"
+_CHUNK = 1 << 20
 
 _OBJECT = re.compile(r'<object\b[^>]*\binstances_count="(\d+)"')
 _BUILD_ITEM = re.compile(r'<item\b[^>]*?\bobjectid="(\d+)"[^>]*>')
 _UNPRINTABLE = re.compile(r'\bprintable="0"')
-_EXTRUDER = re.compile(
-    r'<metadata\b[^>]*\btype="(object|volume)"[^>]*\bkey="extruder"[^>]*\bvalue="(\d+)"'
-)
+_OBJECT_BLOCK = re.compile(r"<object\b.*?(?=<object\b|\Z)", re.S)
+_VOLUME_BLOCK = re.compile(r"<volume\b.*?</volume>", re.S)
+_EXTRUDER = re.compile(r'<metadata\b[^>]*\bkey="extruder"[^>]*\bvalue="(\d+)"')
 
 
 class PreflightError(Exception):
@@ -1437,7 +1454,7 @@ def inspect_plate(path: Path) -> Plate:
         with zipfile.ZipFile(path) as archive:
             names = set(archive.namelist())
             config = _read_member(archive, MODEL_CONFIG, names)
-            model = _read_member(archive, MODEL_FILE, names)
+            model = _read_build(archive, names)
     except (zipfile.BadZipFile, NotImplementedError, RuntimeError, OSError) as exc:
         raise PreflightError(
             f"{path.name}: not a readable 3MF ({exc}). "
@@ -1465,10 +1482,20 @@ def inspect_plate(path: Path) -> Plate:
 
 def _extruders_used(config: str) -> frozenset[int]:
     """The extruders the volumes actually print with, resolved through the object default."""
-    assigned = [(scope, int(n)) for scope, n in _EXTRUDER.findall(config)]
-    # 0 means "inherit", so a volume at 0 beside a volume at 2 is still two materials
-    default = next((n for scope, n in assigned if scope == "object" and n), 1)
-    return frozenset(n or default for scope, n in assigned if scope == "volume")
+    used = set()
+    for block in (m.group(0) for m in _OBJECT_BLOCK.finditer(config)):
+        head = block[: block.find("<volume")]
+        # 0 and absent both mean "inherit", at either level, and an object inherits extruder 1.
+        # A volume carrying no extruder key at all is the common case: PrusaSlicer only writes
+        # one for a volume someone assigned by hand, so dropping those loses the second material.
+        default = _extruder(head) or 1
+        used.update(_extruder(volume) or default for volume in _VOLUME_BLOCK.findall(block))
+    return frozenset(used)
+
+
+def _extruder(block: str) -> int:
+    found = _EXTRUDER.search(block)
+    return int(found.group(1)) if found else 0
 
 
 def _printable_items(model: str) -> list[str] | None:
@@ -1477,6 +1504,34 @@ def _printable_items(model: str) -> list[str] | None:
     if not items:
         return None
     return [objectid for objectid, tag in items if not _UNPRINTABLE.search(tag)]
+
+
+def _read_build(archive: zipfile.ZipFile, names: set[str]) -> str:
+    """The model's <build> section, which is all of it preflight reads.
+
+    Everything above it is the mesh, and a 200 MB one costs about 450 MB of
+    memory to hold as text for the sake of a tag at the end of the file.
+    """
+    if MODEL_FILE not in names:
+        return ""
+    found = False
+    pending = ""
+    with archive.open(MODEL_FILE) as raw:
+        stream = io.TextIOWrapper(raw, encoding="utf-8", errors="replace")
+        while chunk := stream.read(_CHUNK):
+            pending += chunk
+            if not found:
+                start = pending.find("<build")
+                if start < 0:
+                    # a tag can straddle two chunks, so keep enough to rejoin it
+                    pending = pending[-len("</build>") :]
+                    continue
+                pending = pending[start:]
+                found = True
+            end = pending.find("</build>")
+            if end >= 0:
+                return pending[: end + len("</build>")]
+    return pending if found else ""
 
 
 def _read_member(archive: zipfile.ZipFile, name: str, names: set[str]) -> str:

@@ -49,9 +49,9 @@ Everything below was executed on this machine against a real PrusaSlicer 2.9.6, 
   `PrusaSlicer not found. Pass --slicer-path, or install it from https://www.prusa3d.com/prusaslicer/`.
   Confirmed on this machine, where the only PrusaSlicer is a portable build outside every standard
   location.
-- **238 tests, 237 pass and one is skipped** unless `VASEWELD_E2E=1`. That one drives the real
+- **243 tests, 242 pass and one is skipped** unless `VASEWELD_E2E=1`. That one drives the real
   binary end to end; it passes here with `VASEWELD_SLICER` pointed at the portable build. 161 of the
-  238 predate this release and still pass unchanged.
+  243 predate this release and still pass unchanged.
 - **The published artefact was run, not just built.** `python -m build --wheel`, installed into a
   fresh venv, and `vaseweld auto examples/vase.3mf --at 6.0` run through the console entry point
   produced the same 21294-line file, which `vaseweld check` passes.
@@ -123,6 +123,37 @@ Everything below was executed on this machine against a real PrusaSlicer 2.9.6, 
   - `--keep-slices` printed the directory after both passes had finished, so the run that most
     needs the path, one where a pass failed, never printed it. It is printed before the first pass
     now.
+- **A fourth review pass found six, and two of them did not survive being measured.** The four
+  that did each have a test that fails without its fix.
+  - `normalize_fdm` clobbers `filament_retract_layer_change` as well, and that nullable filament
+    override beats `retract_layer_change` wherever it is set, so handing the printer key back did
+    not always restore the retraction. Measured on 2.9.6 with an ini setting both: through the vase
+    ini the normal pass came out with the filament key at 0 against 1 for a plain slice, 398 lines
+    shorter, a retraction and its unretract missing at every one of 199 layer changes. Re-run with
+    every key normalize is suspected of touching set to something non-default, the two footers now
+    differ in nothing at all, and the restored pass matches a plain slice line for line. It is only
+    handed back when the config named it, because a nullable option has no command line spelling
+    for "unset".
+  - `_extruders_used` only counted volumes that carry an `extruder` key, and PrusaSlicer writes one
+    only for a volume someone assigned by hand. An object at extruder 2 with one volume pinned to 1
+    and one left alone read as a single material, so a genuinely two-material plate cost two full
+    slices before `check_compatible` refused it.
+  - Reading the plate decoded the whole of `3D/3dmodel.model` to find the `<build>` tag at the end
+    of it. Measured: a 208 MB model costs 458 MB of memory that way. It streams the member now and
+    stops at `</build>`, same answer in the same 0.3 seconds for 6.4 MB.
+  - Install directories and AppImages were sorted by name, so 2.9.6 will outrank 2.10.0 the day it
+    ships. They sort by version number now.
+  - Not reproduced: that a 3MF's embedded config is applied after `--load`, so the project would
+    win and a vase project plus a normal ini would still slice a single wall. It does not win. An
+    ini holding 3/5/20% over a project holding 7/4/35% slices at 3/5/20%, key by key, which is what
+    `merged_config` already models.
+  - Not reproduced: that two objects with two copies each are reported as "4 objects". They are
+    reported as "2 objects, 4 instances" and refused as "a plate with 2 objects", which is right.
+  - Fell out of measuring the first of those: PrusaSlicer ignores the first line of a project's
+    `Metadata/Slic3r_PE.config`, which in a real project is the generator comment. A hand-built
+    project that puts a setting on line one loses it silently. `project_3mf` already writes the
+    header, so only the throwaway file used for the measurement was wrong, and the fixture now says
+    why the line is there.
 - **Clone check.** difflib over the line lists of every new function against all 112 functions in
   the package. The first pass put `probe_slicer` against `run_slice` at 38.2%: both built the same
   six-keyword `subprocess.run` call, and the review pass had just added `stdin=DEVNULL` to each of
@@ -135,7 +166,9 @@ Everything below was executed on this machine against a real PrusaSlicer 2.9.6, 
   stay apart. `multi_material_3mf` took an `extruders` argument rather than growing a near-copy for
   the `(0, 2)` case, and `_replace_member` learned to add a missing member rather than gaining a
   sibling that only appends. The third pass added no functions at all, only changed existing ones,
-  so there was nothing new to diff.
+  so there was nothing new to diff. The fourth added three, `_newest_first`, `_read_build` and
+  `_extruder`, against 153 functions in the package: the highest is 13.3% and the two short ones
+  score 0% against everything, sharing not one line with anything else.
 
 ## Verified working
 
@@ -154,7 +187,7 @@ Every claim below was executed on this machine, not inferred.
 - **Three delivery paths, byte-identical output.** Wheel installed into a clean venv, standalone
   `vaseweld.py`, and a PyInstaller `vaseweld.exe` built and run on Windows. All three produced
   sha256 `5c03b42c1bf4ac10...` for the same weld.
-- **The suite passes** with `python -m pytest`, 238 tests in about 45 seconds. That includes a
+- **The suite passes** with `python -m pytest`, 243 tests in about 45 seconds. That includes a
   matrix that welds all three slicers in both directions at two cut heights and runs `check` on
   every result.
 - **Three slicers, both directions, two cut heights.** All twelve welds pass `vaseweld check`.

@@ -102,10 +102,11 @@ The normal pass has the opposite problem, and `--spiral-vase=0` does not always 
 spiral vase arrives through `--load`, PrusaSlicer folds it into the config before it reads the
 command line, so an ini holding `perimeters = 3` slices the normal pass at `perimeters = 1` with
 the mode already switched back off: a hollow single-wall base, which is the one thing the weld
-exists to avoid. It also loses layer-change retraction the same way. A `.3mf` project's own
-settings are not touched like this, only a `--load` ini's. So `auto` reads whichever applies and
-hands the four affected settings back explicitly, which is a no-op for a project and the fix for
-an ini.
+exists to avoid. It loses layer-change retraction the same way, at both the printer and the
+filament level. A `.3mf` project's own settings are not touched like this, only a `--load` ini's.
+So `auto` reads whichever applies and hands the five affected settings back explicitly, which is a
+no-op for a project and the fix for an ini. With them back, the normal pass comes out line for line
+the same as slicing that profile with the checkbox never ticked.
 
 The one case that cannot be rescued is a project saved *after* accepting PrusaSlicer's "shall I
 adjust those settings" dialog. Those values are gone from the file, and nothing can recover what
@@ -418,7 +419,7 @@ cd vaseweld
 python -m pytest
 ```
 
-238 tests, about 45 seconds, no dependencies beyond pytest. One of them drives a real PrusaSlicer
+243 tests, about 45 seconds, no dependencies beyond pytest. One of them drives a real PrusaSlicer
 end to end and is skipped unless you set `VASEWELD_E2E=1`, so a machine without the slicer still
 runs the rest. Everything else runs against real slicer
 output committed under `tests/fixtures/`, produced by driving PrusaSlicer 2.9.6, OrcaSlicer 2.4.2

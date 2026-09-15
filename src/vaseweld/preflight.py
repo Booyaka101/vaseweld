@@ -12,6 +12,7 @@ extruder assignment.
 
 from __future__ import annotations
 
+import io
 import re
 import zipfile
 from dataclasses import dataclass
@@ -21,13 +22,14 @@ from .compat import SINGLE_MATERIAL_MSG, SINGLE_OBJECT_MSG
 
 MODEL_CONFIG = "Metadata/Slic3r_PE_model.config"
 MODEL_FILE = "3D/3dmodel.model"
+_CHUNK = 1 << 20
 
 _OBJECT = re.compile(r'<object\b[^>]*\binstances_count="(\d+)"')
 _BUILD_ITEM = re.compile(r'<item\b[^>]*?\bobjectid="(\d+)"[^>]*>')
 _UNPRINTABLE = re.compile(r'\bprintable="0"')
-_EXTRUDER = re.compile(
-    r'<metadata\b[^>]*\btype="(object|volume)"[^>]*\bkey="extruder"[^>]*\bvalue="(\d+)"'
-)
+_OBJECT_BLOCK = re.compile(r"<object\b.*?(?=<object\b|\Z)", re.S)
+_VOLUME_BLOCK = re.compile(r"<volume\b.*?</volume>", re.S)
+_EXTRUDER = re.compile(r'<metadata\b[^>]*\bkey="extruder"[^>]*\bvalue="(\d+)"')
 
 
 class PreflightError(Exception):
@@ -65,7 +67,7 @@ def inspect_plate(path: Path) -> Plate:
         with zipfile.ZipFile(path) as archive:
             names = set(archive.namelist())
             config = _read_member(archive, MODEL_CONFIG, names)
-            model = _read_member(archive, MODEL_FILE, names)
+            model = _read_build(archive, names)
     except (zipfile.BadZipFile, NotImplementedError, RuntimeError, OSError) as exc:
         raise PreflightError(
             f"{path.name}: not a readable 3MF ({exc}). "
@@ -93,10 +95,20 @@ def inspect_plate(path: Path) -> Plate:
 
 def _extruders_used(config: str) -> frozenset[int]:
     """The extruders the volumes actually print with, resolved through the object default."""
-    assigned = [(scope, int(n)) for scope, n in _EXTRUDER.findall(config)]
-    # 0 means "inherit", so a volume at 0 beside a volume at 2 is still two materials
-    default = next((n for scope, n in assigned if scope == "object" and n), 1)
-    return frozenset(n or default for scope, n in assigned if scope == "volume")
+    used = set()
+    for block in (m.group(0) for m in _OBJECT_BLOCK.finditer(config)):
+        head = block[: block.find("<volume")]
+        # 0 and absent both mean "inherit", at either level, and an object inherits extruder 1.
+        # A volume carrying no extruder key at all is the common case: PrusaSlicer only writes
+        # one for a volume someone assigned by hand, so dropping those loses the second material.
+        default = _extruder(head) or 1
+        used.update(_extruder(volume) or default for volume in _VOLUME_BLOCK.findall(block))
+    return frozenset(used)
+
+
+def _extruder(block: str) -> int:
+    found = _EXTRUDER.search(block)
+    return int(found.group(1)) if found else 0
 
 
 def _printable_items(model: str) -> list[str] | None:
@@ -105,6 +117,34 @@ def _printable_items(model: str) -> list[str] | None:
     if not items:
         return None
     return [objectid for objectid, tag in items if not _UNPRINTABLE.search(tag)]
+
+
+def _read_build(archive: zipfile.ZipFile, names: set[str]) -> str:
+    """The model's <build> section, which is all of it preflight reads.
+
+    Everything above it is the mesh, and a 200 MB one costs about 450 MB of
+    memory to hold as text for the sake of a tag at the end of the file.
+    """
+    if MODEL_FILE not in names:
+        return ""
+    found = False
+    pending = ""
+    with archive.open(MODEL_FILE) as raw:
+        stream = io.TextIOWrapper(raw, encoding="utf-8", errors="replace")
+        while chunk := stream.read(_CHUNK):
+            pending += chunk
+            if not found:
+                start = pending.find("<build")
+                if start < 0:
+                    # a tag can straddle two chunks, so keep enough to rejoin it
+                    pending = pending[-len("</build>") :]
+                    continue
+                pending = pending[start:]
+                found = True
+            end = pending.find("</build>")
+            if end >= 0:
+                return pending[: end + len("</build>")]
+    return pending if found else ""
 
 
 def _read_member(archive: zipfile.ZipFile, name: str, names: set[str]) -> str:
