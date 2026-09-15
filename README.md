@@ -424,7 +424,7 @@ cd vaseweld
 python -m pytest
 ```
 
-260 tests, about 45 seconds, no dependencies beyond pytest. One of them drives a real PrusaSlicer
+265 tests, about 45 seconds, no dependencies beyond pytest. One of them drives a real PrusaSlicer
 end to end and is skipped unless you set `VASEWELD_E2E=1`, so a machine without the slicer still
 runs the rest. Everything else runs against real slicer
 output committed under `tests/fixtures/`, produced by driving PrusaSlicer 2.9.6, OrcaSlicer 2.4.2

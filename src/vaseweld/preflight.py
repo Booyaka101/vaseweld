@@ -15,6 +15,7 @@ from __future__ import annotations
 import io
 import re
 import zipfile
+import zlib
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -69,7 +70,14 @@ def inspect_plate(path: Path) -> Plate:
             names = set(archive.namelist())
             config = _read_member(archive, MODEL_CONFIG, names)
             model = _read_build(archive, names)
-    except (zipfile.BadZipFile, NotImplementedError, RuntimeError, OSError) as exc:
+    except (
+        zipfile.BadZipFile,
+        NotImplementedError,
+        RuntimeError,
+        OSError,
+        zlib.error,
+        EOFError,
+    ) as exc:
         raise PreflightError(
             f"{path.name}: not a readable 3MF ({exc}). "
             "Re-save the project from PrusaSlicer, or pass the model file instead."

@@ -8,7 +8,7 @@ import pytest
 
 import vaseweld.slicer
 from conftest import FakePrusaSlicer, example, fixture, multi_material_3mf, project_3mf
-from vaseweld.cli import EXIT_OK, EXIT_USAGE, _ladder_divergence, main
+from vaseweld.cli import EXIT_OK, EXIT_USAGE, _ladder_divergence, _SliceDir, main
 from vaseweld.parser import parse_file
 from vaseweld.slicer import DOWNLOAD_URL, SPIRAL_VASE_OVERRIDES
 
@@ -354,13 +354,21 @@ def test_an_output_directory_that_is_not_there_is_caught_before_slicing(
     assert fake_slicer.slices == []
 
 
-def test_a_timeout_that_is_not_a_finite_number_never_launches_the_slicer(fake_slicer, tmp_path):
-    """subprocess.run(timeout=nan) raises ValueError, and only after PrusaSlicer is already up."""
-    argv = auto_argv(fake_slicer, tmp_path / "out.gcode", extra=["--slicer-timeout", "nan"])
+@pytest.mark.parametrize("timeout", ["nan", "0", "-5"])
+def test_a_timeout_that_cannot_work_never_launches_the_slicer(fake_slicer, tmp_path, timeout):
+    """nan reaches subprocess.run and raises; 0 and anything below start a pass to kill it."""
+    argv = auto_argv(fake_slicer, tmp_path / "out.gcode", extra=["--slicer-timeout", timeout])
     with pytest.raises(SystemExit) as raised:
         main(argv)
     assert raised.value.code == EXIT_USAGE
     assert fake_slicer.calls == []
+
+
+def test_a_file_left_open_in_the_temp_dir_does_not_break_a_finished_run():
+    """Windows will not delete an open file, and cleanup must not turn a written weld into a crash."""
+    with _SliceDir(None) as workdir:
+        held = (workdir / "held.gcode").open("w", encoding="utf-8")
+    held.close()
 
 
 def test_a_path_with_no_name_is_refused_like_any_other_directory(fake_slicer, capsys):

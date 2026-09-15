@@ -20,6 +20,7 @@ import shutil
 import subprocess
 import sys
 import zipfile
+import zlib
 from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
@@ -302,7 +303,15 @@ def print_config(path: Path) -> dict[str, str]:
         else:
             text = path.read_text(encoding="utf-8", errors="replace")
             pattern = _INI_SETTING
-    except (zipfile.BadZipFile, NotImplementedError, RuntimeError, OSError, ValueError):
+    except (
+        zipfile.BadZipFile,
+        NotImplementedError,
+        RuntimeError,
+        OSError,
+        ValueError,
+        zlib.error,
+        EOFError,
+    ):
         return {}
     found = (pattern.match(line) for line in text.splitlines())
     return {m.group(1): m.group(2) for m in found if m}

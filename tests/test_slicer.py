@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 import vaseweld.slicer
-from conftest import fixture, project_3mf
+from conftest import corrupt_member, fixture, project_3mf
 from vaseweld.slicer import (
     NORMAL_OVERRIDES,
     SPIRAL_VASE_OVERRIDES,
@@ -333,6 +333,12 @@ def test_a_profile_with_supports_on_is_told_the_spiral_pass_cannot_have_them(tmp
         warning = dropped_supports(merged_config(project))
         assert warning is not None
         assert "refuses to slice spiral vase with supports" in warning
+
+
+def test_a_project_whose_config_will_not_decompress_is_read_as_having_none(tmp_path):
+    """Preflight passes when only this member is damaged, so merged_config has to survive it."""
+    project = project_3mf(tmp_path, "damaged.3mf", spiral_vase="1", perimeters="7")
+    assert merged_config(corrupt_member(project, "Metadata/Slic3r_PE.config")) == {}
 
 
 def test_a_model_with_no_config_in_it_asks_for_the_slicers_own_defaults(tmp_path):

@@ -49,9 +49,9 @@ Everything below was executed on this machine against a real PrusaSlicer 2.9.6, 
   `PrusaSlicer not found. Pass --slicer-path, or install it from https://www.prusa3d.com/prusaslicer/`.
   Confirmed on this machine, where the only PrusaSlicer is a portable build outside every standard
   location.
-- **260 tests, 259 pass and one is skipped** unless `VASEWELD_E2E=1`. That one drives the real
+- **265 tests, 264 pass and one is skipped** unless `VASEWELD_E2E=1`. That one drives the real
   binary end to end; it passes here with `VASEWELD_SLICER` pointed at the portable build. 161 of the
-  260 predate this release and still pass unchanged.
+  265 predate this release and still pass unchanged.
 - **The published artefact was run, not just built.** `python -m build --wheel`, installed into a
   fresh venv, and `vaseweld auto examples/vase.3mf --at 6.0` run through the console entry point
   produced the same 21294-line file, which `vaseweld check` passes.
@@ -253,6 +253,25 @@ Everything below was executed on this machine against a real PrusaSlicer 2.9.6, 
     `cylinder_6mm.3mf` with its one `<item>` removed, `auto` used to print `1 object` and then hand
     PrusaSlicer a file it refused to load, and now says the plate has nothing on it set to print
     before anything runs.
+- **A tenth review pass found four, all of them ways a run ends in a traceback rather than a
+  message.**
+  - A 3MF whose deflate stream is damaged raises `zlib.error`, not `zipfile.BadZipFile`, and
+    neither `inspect_plate` nor `print_config` caught it. Reproduced by flipping 30 bytes inside
+    one member of `cylinder_6mm.3mf`: the run died on
+    `zlib.error: Error -3 while decompressing data`. Both now catch it, along with `EOFError` for a
+    truncated one. Damage to only `Metadata/Slic3r_PE.config` gets past preflight, which reads a
+    different member, so that one had to be fixed in `print_config` too. It reads as no config at
+    all, which is the same answer the module already gives for any unreadable config and the same
+    one PrusaSlicer reaches: the slice comes out at its built-in defaults either way.
+  - `--slicer-timeout 0`, and anything below it, launched PrusaSlicer and killed it at once for
+    "did not finish within 0s". `_finite` takes a `positive` flag now. `--at` keeps accepting
+    negatives, because a cut below the bed gets the weldable range printed at it, which is a more
+    useful answer than a usage error.
+  - `TemporaryDirectory.cleanup()` can raise on Windows while anything still holds a file in the
+    directory, which turns a written, welded, finished run into a traceback and hides the real
+    error when a pass has already failed. `ignore_cleanup_errors=True` has been there since 3.10,
+    which is this project's floor. The test holds a file open across the exit and fails without it
+    on this machine, so it is a real test here rather than a POSIX no-op.
 - **Clone check.** difflib over the line lists of every new function against all 112 functions in
   the package. The first pass put `probe_slicer` against `run_slice` at 38.2%: both built the same
   six-keyword `subprocess.run` call, and the review pass had just added `stdin=DEVNULL` to each of
@@ -285,7 +304,9 @@ Everything below was executed on this machine against a real PrusaSlicer 2.9.6, 
   the same way. `_finite` scores 84.2% against the `parse` closure it returns, which is the checker
   reading a nested function's lines twice, once on its own and once inside its parent. Worth saying
   out loud rather than reporting as clean: it is an artefact of the measurement, not a pair of
-  functions.
+  functions. The tenth added one, `corrupt_member` in `conftest.py`, at 10.0% against
+  `_replace_member` beside it: both open a zip and write it back, and share no lines doing it. Its
+  three new tests all score under 19%.
 
 ## Verified working
 
@@ -304,7 +325,7 @@ Every claim below was executed on this machine, not inferred.
 - **Three delivery paths, byte-identical output.** Wheel installed into a clean venv, standalone
   `vaseweld.py`, and a PyInstaller `vaseweld.exe` built and run on Windows. All three produced
   sha256 `5c03b42c1bf4ac10...` for the same weld.
-- **The suite passes** with `python -m pytest`, 260 tests in about 45 seconds. That includes a
+- **The suite passes** with `python -m pytest`, 265 tests in about 45 seconds. That includes a
   matrix that welds all three slicers in both directions at two cut heights and runs `check` on
   every result.
 - **Three slicers, both directions, two cut heights.** All twelve welds pass `vaseweld check`.
