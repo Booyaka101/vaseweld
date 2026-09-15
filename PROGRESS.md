@@ -49,9 +49,9 @@ Everything below was executed on this machine against a real PrusaSlicer 2.9.6, 
   `PrusaSlicer not found. Pass --slicer-path, or install it from https://www.prusa3d.com/prusaslicer/`.
   Confirmed on this machine, where the only PrusaSlicer is a portable build outside every standard
   location.
-- **267 tests, 266 pass and one is skipped** unless `VASEWELD_E2E=1`. That one drives the real
+- **270 tests, 269 pass and one is skipped** unless `VASEWELD_E2E=1`. That one drives the real
   binary end to end; it passes here with `VASEWELD_SLICER` pointed at the portable build. 161 of the
-  267 predate this release and still pass unchanged.
+  270 predate this release and still pass unchanged.
 - **The published artefact was run, not just built.** `python -m build --wheel`, installed into a
   fresh venv, and `vaseweld auto examples/vase.3mf --at 6.0` run through the console entry point
   produced the same 21294-line file, which `vaseweld check` passes.
@@ -285,6 +285,20 @@ Everything below was executed on this machine against a real PrusaSlicer 2.9.6, 
     the working directory. Demonstrated by running from a directory holding
     `Programs/PrusaSlicer-2.9.9/prusa-slicer-console.exe`, which the search offered up as an install.
     The join only happens when the variable is set now.
+- **A twelfth review pass found two, both the eleventh pass's bug wearing a different name.**
+  - `-o` onto a `--load` ini overwrote it. Reproduced: a 19-byte `print.ini` came back as 861869
+    bytes of G-code, exit 0, no warning. The eleventh pass guarded the project because that is the
+    input it was looking at, and the `--load` files are inputs in exactly the same way. The guard
+    takes a list of taken names now instead of one path, so adding the next one is a tuple entry.
+  - `-o` naming one of the two derived slice paths under `--keep-slices` replaced that kept pass
+    with the weld. Reproduced: `--keep-slices kept -o kept/vase-normal.gcode` left the kept
+    `vase-normal.gcode` as the 582785-byte weld, so the thing `--keep-slices` exists to hand you was
+    the one file it did not keep. Both derived names are taken now. `-o` anywhere else inside the
+    kept directory still works, which is a reasonable thing to ask for and has a test of its own.
+  - The guard moved after the workdir is created for that reason, and the `--keep-slices` line is
+    printed before it, so a refusal still tells you which directory the names it is complaining
+    about live in. `samefile` will not do here, because the two slices do not exist yet, so the
+    comparison is `normcase(realpath())`, which also catches the project by a different spelling.
 - **Clone check.** difflib over the line lists of every new function against all 112 functions in
   the package. The first pass put `probe_slicer` against `run_slice` at 38.2%: both built the same
   six-keyword `subprocess.run` call, and the review pass had just added `stdin=DEVNULL` to each of
@@ -320,7 +334,13 @@ Everything below was executed on this machine against a real PrusaSlicer 2.9.6, 
   functions. The tenth added one, `corrupt_member` in `conftest.py`, at 10.0% against
   `_replace_member` beside it: both open a zip and write it back, and share no lines doing it. Its
   three new tests all score under 19%. The eleventh added no functions, only two tests, the higher
-  at 25.0% against the `-o` guard test beside it.
+  at 25.0% against the `-o` guard test beside it. The twelfth widened
+  `_reject_unwritable_output` rather than adding a second guard beside it, so it added no
+  functions either. Of its three new tests the two refusals sit at 31.6% against the guard
+  test they are modelled on, and the third, which proves `-o` beside the kept slices still
+  works, is at 54.5% against `test_keep_slices_leaves_both_passes_on_disk`. That one is close
+  and it stayed: the two run the same command and then assert different things about what is
+  on disk, and folding them into one parametrized test would hide which of the two broke.
 
 ## Verified working
 
@@ -339,7 +359,7 @@ Every claim below was executed on this machine, not inferred.
 - **Three delivery paths, byte-identical output.** Wheel installed into a clean venv, standalone
   `vaseweld.py`, and a PyInstaller `vaseweld.exe` built and run on Windows. All three produced
   sha256 `5c03b42c1bf4ac10...` for the same weld.
-- **The suite passes** with `python -m pytest`, 267 tests in about 45 seconds. That includes a
+- **The suite passes** with `python -m pytest`, 270 tests in about 45 seconds. That includes a
   matrix that welds all three slicers in both directions at two cut heights and runs `check` on
   every result.
 - **Three slicers, both directions, two cut heights.** All twelve welds pass `vaseweld check`.

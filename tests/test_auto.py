@@ -391,6 +391,43 @@ def test_writing_over_the_project_is_refused_before_slicing(fake_slicer, tmp_pat
     assert fake_slicer.slices == []
 
 
+def test_writing_over_a_load_config_is_refused_before_slicing(fake_slicer, tmp_path, capsys):
+    """A --load ini is an input like the project, and G-code on top of it is unrecoverable."""
+    config = tmp_path / "print.ini"
+    config.write_text("layer_height = 0.2\n", encoding="utf-8")
+    argv = auto_argv(fake_slicer, config, extra=["--load", str(config)])
+    code, _, stderr = run(argv, capsys)
+    assert code == EXIT_USAGE
+    assert "is a --load config" in stderr[0]
+    assert config.read_text(encoding="utf-8") == "layer_height = 0.2\n"
+    assert fake_slicer.slices == []
+
+
+def test_writing_over_a_kept_slice_is_refused_before_slicing(fake_slicer, tmp_path, capsys):
+    """-o inside --keep-slices is fine, but the two derived names are about to be written."""
+    kept = tmp_path / "slices"
+    argv = auto_argv(
+        fake_slicer, kept / "cylinder_6mm-normal.gcode", extra=["--keep-slices", str(kept)]
+    )
+    code, _, stderr = run(argv, capsys)
+    assert code == EXIT_USAGE
+    assert "is where the normal pass goes" in stderr[0]
+    assert fake_slicer.slices == []
+
+
+def test_an_output_beside_the_kept_slices_still_works(fake_slicer, tmp_path, capsys):
+    kept = tmp_path / "slices"
+    argv = auto_argv(fake_slicer, kept / "hybrid.gcode", extra=["--keep-slices", str(kept)])
+    code, stdout, _ = run(argv, capsys)
+    assert code == EXIT_OK
+    assert sorted(p.name for p in kept.iterdir()) == [
+        "cylinder_6mm-normal.gcode",
+        "cylinder_6mm-spiral.gcode",
+        "hybrid.gcode",
+    ]
+    assert stdout[-1].startswith(f"wrote {kept / 'hybrid.gcode'} (")
+
+
 def test_an_output_that_is_a_directory_is_caught_before_slicing(fake_slicer, tmp_path, capsys):
     existing = tmp_path / "out"
     existing.mkdir()
