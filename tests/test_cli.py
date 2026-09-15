@@ -110,6 +110,15 @@ def test_writing_binary_gcode_is_refused(tmp_path, capsys):
     assert not out.exists()
 
 
+@pytest.mark.parametrize("cut", ["nan", "inf", "zzz"])
+def test_a_cut_that_is_not_a_finite_number_is_refused_at_the_flag(tmp_path, capsys, cut):
+    """Through `auto` this would otherwise cost two full slicing runs before anything noticed."""
+    with pytest.raises(SystemExit) as raised:
+        main(weld_argv(at=cut, output=tmp_path / "out.gcode"))
+    assert raised.value.code == EXIT_USAGE
+    assert "must be a number of mm" in capsys.readouterr().err
+
+
 def test_no_destination_is_refused(capsys):
     code, _, stderr = run(weld_argv(), capsys)
     assert code == EXIT_USAGE

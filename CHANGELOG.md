@@ -28,7 +28,8 @@
 - PrusaSlicer exits 0 and writes nothing when a slice fails, so the return code alone proves nothing.
   `auto` checks the file exists and reports the last line PrusaSlicer printed when it does not. An
   `-o` that cannot be written, into a directory that is not there or onto a directory itself, is
-  refused before the first pass rather than after both.
+  refused before the first pass rather than after both, and so is a project that is a directory
+  rather than a file, including `.` and a drive root, which used to reach a Python traceback.
 - The normal pass really is a normal pass. Passing `--spiral-vase=0` turns the mode off, but when
   spiral vase arrives through `--load` PrusaSlicer folds it into the config before it looks at the
   command line, so an ini holding `perimeters = 3`, `top_solid_layers = 5`, `fill_density = 20%`
@@ -64,6 +65,11 @@
   are reported as two objects and four instances rather than four objects. Reading the plate streams
   the model rather than holding it: a 200 MB mesh cost about 450 MB of memory to find one tag at the
   end of the file, and now costs about 6 MB.
+- `--at nan` is refused at the flag, along with `inf` and anything else that is not a number of
+  millimetres. The weldable-range check was a pair of one-sided comparisons and nan is false against
+  both ends, so it used to get all the way to a crash, after both slicing passes in the case of
+  `auto`. The range check itself is a containment test now as well, so nothing gets through it that
+  cannot name a layer.
 - `--slicer-path` accepts a macOS `.app` bundle, not just the binary buried inside it, and the
   error for a directory with no slicer in it names something that exists on your platform. Where
   several versions are installed side by side, the newest is tried first by version number rather

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import math
 import os
 import sys
 import tempfile
@@ -57,12 +58,23 @@ let it append the temporary file path:
 """
 
 
+def _cut_height(text: str) -> float:
+    """argparse type for --at. nan slips past a two-sided range check, so refuse it here."""
+    try:
+        value = float(text)
+    except ValueError:
+        value = math.nan
+    if not math.isfinite(value):
+        raise argparse.ArgumentTypeError(f"cut height must be a number of mm, got {text!r}")
+    return value
+
+
 def _add_weld_options(cmd: argparse.ArgumentParser) -> None:
     """Options that mean the same thing to `weld` and to `auto`."""
     cmd.add_argument(
         "--at",
         required=True,
-        type=float,
+        type=_cut_height,
         metavar="Z",
         action="append",
         help="cut height in mm; repeat it to alternate again, so two cuts give a "
@@ -399,6 +411,8 @@ def _run_auto(args: argparse.Namespace, out: "object") -> int:
     _validate_flow("--start-flow", args.start_flow)
     _validate_flow("--finish-flow", args.finish_flow)
     project: Path = args.project
+    # before the default output name is built from it, because "." has no stem to build one from
+    plate = check_plate(project)
     output = args.output or project.with_name(f"{project.stem}-vaseweld.gcode")
     _reject_bgcode_output(output)
 
@@ -407,7 +421,6 @@ def _run_auto(args: argparse.Namespace, out: "object") -> int:
         if not config.is_file():
             raise SlicerError(f"{config}: no such config file. Check --load.")
 
-    plate = check_plate(project)
     found = probe_slicer(find_slicer(args.slicer_path))
     complaint = version_complaint(found)
     if complaint is not None:
