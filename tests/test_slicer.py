@@ -132,11 +132,23 @@ def test_an_explicit_directory_is_searched_for_the_binary(fake_slicer):
     assert find_slicer(fake_slicer.path.parent) == fake_slicer.path
 
 
-def test_an_explicit_directory_without_a_binary_says_which_names_it_wanted(tmp_path):
+@pytest.mark.parametrize(
+    "platform, wanted",
+    [
+        ("win32", "prusa-slicer-console.exe"),
+        ("darwin", "PrusaSlicer.app, or the Contents/MacOS/PrusaSlicer inside it"),
+        ("linux", "prusa-slicer."),
+    ],
+)
+def test_an_explicit_directory_without_a_binary_says_which_name_it_wanted(
+    tmp_path, monkeypatch, platform, wanted
+):
+    """The hint is per platform, so asserting the Windows one passes only on Windows."""
+    monkeypatch.setattr(vaseweld.slicer.sys, "platform", platform)
     with pytest.raises(SlicerError) as excinfo:
         find_slicer(tmp_path)
     assert "no PrusaSlicer binary in it" in str(excinfo.value)
-    assert "prusa-slicer-console.exe" in str(excinfo.value)
+    assert wanted in str(excinfo.value)
 
 
 def test_an_explicit_path_that_does_not_exist_names_the_flag(tmp_path):
@@ -365,13 +377,6 @@ def test_a_macos_app_bundle_is_a_slicer_path_worth_accepting(tmp_path):
     binary.parent.mkdir(parents=True)
     binary.write_text("#!/bin/sh\n", encoding="utf-8")
     assert find_slicer(tmp_path / "PrusaSlicer.app") == binary
-
-
-def test_a_directory_with_nothing_in_it_still_says_what_to_point_at(tmp_path):
-    with pytest.raises(SlicerError) as excinfo:
-        find_slicer(tmp_path)
-    assert "no PrusaSlicer binary in it" in str(excinfo.value)
-    assert ".exe" in str(excinfo.value) or "prusa-slicer" in str(excinfo.value)
 
 
 def test_a_newer_install_is_tried_before_an_older_one(tmp_path, monkeypatch):
