@@ -23,6 +23,7 @@ from vaseweld.slicer import (
     version_complaint,
 )
 
+PROJECT = "cylinder_6mm.3mf"
 VERIFIED = Slicer(path=Path("prusa-slicer"), banner="", release=(2, 9, 6))
 
 
@@ -247,6 +248,7 @@ def test_a_vase_project_hands_back_what_normalize_would_eat(tmp_path):
         "--perimeters=7",
         "--top-solid-layers=4",
         "--fill-density=35%",
+        "--retract-layer-change=0",
     )
 
 
@@ -308,3 +310,35 @@ def test_a_directory_with_nothing_in_it_still_says_what_to_point_at(tmp_path):
         find_slicer(tmp_path)
     assert "no PrusaSlicer binary in it" in str(excinfo.value)
     assert ".exe" in str(excinfo.value) or "prusa-slicer" in str(excinfo.value)
+
+
+def test_a_commented_out_line_in_an_ini_is_not_a_setting(tmp_path):
+    """PrusaSlicer treats ";" as a comment in an ini, so reading one as live would fight it."""
+    ini = tmp_path / "print.ini"
+    ini.write_text(
+        "spiral_vase = 1\nperimeters = 4\n; perimeters = 1\n# perimeters = 2\n", encoding="utf-8"
+    )
+    assert merged_config(fixture("cylinder_6mm.3mf"), (ini,))["perimeters"] == "4"
+    assert "--perimeters=4" in normal_overrides(merged_config(fixture("cylinder_6mm.3mf"), (ini,)))
+
+
+def test_the_project_block_still_needs_its_semicolons(tmp_path):
+    project = project_3mf(tmp_path, "vase.3mf", spiral_vase="1", perimeters="7")
+    assert merged_config(project)["perimeters"] == "7"
+
+
+def test_layer_change_retraction_is_put_back_too(tmp_path):
+    """normalize_fdm turns it off with the rest, and nothing downstream turns it on again."""
+    ini = tmp_path / "vase.ini"
+    ini.write_text("spiral_vase = 1\nretract_layer_change = 1\n", encoding="utf-8")
+    assert "--retract-layer-change=1" in normal_overrides(merged_config(fixture(PROJECT), (ini,)))
+
+
+def test_a_bare_mesh_is_never_opened_looking_for_settings(tmp_path, monkeypatch):
+    """A .stl is geometry, and reading 100 MB of it to find no keys is pure waste."""
+    stl = tmp_path / "huge.stl"
+    stl.write_bytes(b"not read")
+    monkeypatch.setattr(
+        Path, "read_text", lambda *a, **k: pytest.fail("the mesh should not be read")
+    )
+    assert merged_config(stl) == {}

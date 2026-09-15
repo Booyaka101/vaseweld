@@ -24,17 +24,19 @@
   builds warn and carry on.
 - PrusaSlicer exits 0 and writes nothing when a slice fails, so the return code alone proves nothing.
   `auto` checks the file exists and reports the last line PrusaSlicer printed when it does not.
-- The normal pass really is a normal pass. Passing `--spiral-vase=0` turns the mode off, but
-  PrusaSlicer folds spiral vase into the loaded config before it looks at the command line, so a
-  project holding `perimeters = 7`, `top_solid_layers = 4`, `fill_density = 35%` still sliced its
-  normal pass at `1`, `0`, `0%`: a hollow single-wall base, which is the one thing the weld exists
-  to avoid. `auto` now reads the project's own print settings, and any `--load` ini layered over
-  them, and hands those three values straight back on the command line. Measured on 2.9.6, the
-  normal pass goes from 0 perimeter and 0 infill sections to 29 and 22. Where the project was saved
-  after accepting PrusaSlicer's "shall I adjust those settings" dialog the originals are gone from
-  the file, and `auto` says so rather than pretending otherwise. As a backstop it also reads
-  `spiral_vase` back out of both sliced files and refuses to weld two passes that came out in the
-  same mode.
+- The normal pass really is a normal pass. Passing `--spiral-vase=0` turns the mode off, but when
+  spiral vase arrives through `--load` PrusaSlicer folds it into the config before it looks at the
+  command line, so an ini holding `perimeters = 3`, `top_solid_layers = 5`, `fill_density = 20%`
+  still sliced its normal pass at `1`, `0`, `0%` with 0 perimeter and 0 infill sections: a hollow
+  single-wall base, which is the one thing the weld exists to avoid. Layer-change retraction goes
+  the same way, worth 200 retractions against 2 on a profile that does not already retract before
+  travel. `auto` now reads the project's own print settings, layers any `--load` ini over them the
+  way PrusaSlicer does, and hands those four values back explicitly. A `.3mf` project's embedded
+  settings turn out not to be clobbered like this, so for a project the overrides hand back what
+  the file already said. Where the project was saved after accepting PrusaSlicer's "shall I adjust
+  those settings" dialog the originals are gone from the file, and `auto` says so rather than
+  pretending otherwise. As a backstop it also reads `spiral_vase` back out of both sliced files and
+  refuses to weld two passes that came out in the same mode.
 - A plate is counted the way PrusaSlicer counts it. Objects parked as not printable are not on the
   plate, and volume extruder `0` means "inherit the object's extruder" rather than a second
   material, so neither is refused any more. A volume left at `0` next to one assigned to extruder 2

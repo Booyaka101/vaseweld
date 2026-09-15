@@ -401,6 +401,9 @@ def _run_auto(args: argparse.Namespace, out: "object") -> int:
         print(f"warning: {lost}", file=sys.stderr)
 
     with _SliceDir(args.keep_slices) as workdir:
+        # said before the first pass runs, so a pass that fails still says where to look
+        if args.keep_slices is not None:
+            print(f"keeping both slices in {workdir}", file=out)
         normal_path = workdir / f"{project.stem}-normal.gcode"
         vase_path = workdir / f"{project.stem}-spiral.gcode"
         for step, (destination, overrides, label) in enumerate(
@@ -421,10 +424,6 @@ def _run_auto(args: argparse.Namespace, out: "object") -> int:
                 timeout=args.slicer_timeout,
                 echo=echo,
             )
-
-        # said before the checks below, so an abort still tells the user where to look
-        if args.keep_slices is not None:
-            print(f"kept both slices in {workdir}", file=out)
 
         normal, vase = parse_file(normal_path), parse_file(vase_path)
         look = (

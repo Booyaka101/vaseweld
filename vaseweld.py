@@ -1019,13 +1019,21 @@ SPIRAL_VASE_OVERRIDES = (
 # so nothing downstream notices, and the "solid base" is a single wall.
 NORMAL_OVERRIDES = ("--spiral-vase=0",)
 
-# ...but turning the mode off is not enough on its own. normalize_fdm() forces these three
-# the moment it sees spiral_vase, and on 2.9.6 it runs over the loaded config *before* the
-# command line overrides land, so --spiral-vase=0 alone still yields one perimeter, no infill
-# and no lid. Measured: a project holding perimeters=7/top_solid_layers=4/fill_density=35%
-# slices its normal pass at 1/0/0%. So read what the config meant and hand it back. The
-# fallbacks are 2.9.6's own defaults, for a config that never named the key.
-VASE_CLOBBERED = (("perimeters", "3"), ("top_solid_layers", "3"), ("fill_density", "20%"))
+# ...but turning the mode off is not always enough. normalize_fdm() forces these four the
+# moment it sees spiral_vase, and when spiral_vase arrives through --load it runs before the
+# command line overrides land, so --spiral-vase=0 leaves them forced. Measured on 2.9.6: an
+# ini holding perimeters=3/top_solid_layers=5/fill_density=20% slices at 1/0/0%, one wall and
+# no infill. A 3MF's embedded config is *not* clobbered this way, so for a project these are
+# a no-op that hands back what the file already said. retract_layer_change is worth the
+# fourth slot even though most profiles retract at a layer change anyway: with
+# retract_before_travel high enough that they do not, losing it drops 200 retractions to 2.
+# Fallbacks are 2.9.6's own defaults, for a config that never named the key.
+VASE_CLOBBERED = (
+    ("perimeters", "3"),
+    ("top_solid_layers", "3"),
+    ("fill_density", "20%"),
+    ("retract_layer_change", "0"),
+)
 
 VERIFIED_SERIES = (2, 9)
 REFACTORED_SERIES = (3, 0)
@@ -1037,8 +1045,10 @@ _EXE_NAMES = ("prusa-slicer-console.exe", "prusa-slicer", "prusa-slicer.exe", "P
 # --slicer-path at a .app is the natural thing to try on macOS; the binary is buried in it.
 _BUNDLE_BINARY = "Contents/MacOS/PrusaSlicer"
 _PROBE_TIMEOUT = 60.0
-# A project's embedded config uses the G-code footer's "; key = value"; an ini drops the ";".
-_SETTING = re.compile(r"^\s*(?:;\s*)?([a-z][a-z0-9_]*)\s*=\s*(.*?)\s*$")
+# A project's embedded config uses the G-code footer's "; key = value". An ini does not, and
+# there ";" starts a comment, so one regex for both would read commented-out lines as live.
+_PROJECT_SETTING = re.compile(r"^;\s*([a-z][a-z0-9_]*)\s*=\s*(.*?)\s*$")
+_INI_SETTING = re.compile(r"^([a-z][a-z0-9_]*)\s*=\s*(.*?)\s*$")
 _VASE_FINGERPRINT = (
     ("perimeters", ("1",)),
     ("top_solid_layers", ("0",)),
@@ -1246,17 +1256,20 @@ def print_config(path: Path) -> dict[str, str]:
                 if PRINT_CONFIG not in archive.namelist():
                     return {}
                 text = archive.read(PRINT_CONFIG).decode("utf-8", errors="replace")
+            pattern = _PROJECT_SETTING
         else:
             text = path.read_text(encoding="utf-8", errors="replace")
+            pattern = _INI_SETTING
     except (zipfile.BadZipFile, NotImplementedError, RuntimeError, OSError, ValueError):
         return {}
-    found = (_SETTING.match(line) for line in text.splitlines())
+    found = (pattern.match(line) for line in text.splitlines())
     return {m.group(1): m.group(2) for m in found if m}
 
 
 def merged_config(source: Path, load: tuple[Path, ...] = ()) -> dict[str, str]:
     """What PrusaSlicer will end up loading. Each --load wins over the project."""
-    config = print_config(source)
+    # only a 3MF carries settings, and a bare mesh is megabytes of geometry worth not reading
+    config = print_config(source) if source.suffix.lower() == ".3mf" else {}
     for ini in load:
         config.update(print_config(ini))
     return config
@@ -3293,6 +3306,9 @@ def _run_auto(args: argparse.Namespace, out: "object") -> int:
         print(f"warning: {lost}", file=sys.stderr)
 
     with _SliceDir(args.keep_slices) as workdir:
+        # said before the first pass runs, so a pass that fails still says where to look
+        if args.keep_slices is not None:
+            print(f"keeping both slices in {workdir}", file=out)
         normal_path = workdir / f"{project.stem}-normal.gcode"
         vase_path = workdir / f"{project.stem}-spiral.gcode"
         for step, (destination, overrides, label) in enumerate(
@@ -3313,10 +3329,6 @@ def _run_auto(args: argparse.Namespace, out: "object") -> int:
                 timeout=args.slicer_timeout,
                 echo=echo,
             )
-
-        # said before the checks below, so an abort still tells the user where to look
-        if args.keep_slices is not None:
-            print(f"kept both slices in {workdir}", file=out)
 
         normal, vase = parse_file(normal_path), parse_file(vase_path)
         look = (
@@ -3400,6 +3412,7 @@ def main(argv: list[str] | None = None, out: "object" = None) -> int:
     except KeyboardInterrupt:
         print("vaseweld: interrupted", file=sys.stderr)
         return EXIT_USAGE
+
 
 if __name__ == "__main__":
     sys.exit(main())
