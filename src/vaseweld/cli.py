@@ -16,11 +16,13 @@ from .preview import write as write_preview
 from .slicer import (
     SPIRAL_VASE_OVERRIDES,
     SlicerError,
+    dropped_supports,
     find_slicer,
     merged_config,
     normal_overrides,
     probe_slicer,
     run_slice,
+    supports_are_on,
     unrecoverable_vase,
     version_complaint,
 )
@@ -336,6 +338,17 @@ def _mode_divergence(normal: GcodeFile, vase: GcodeFile) -> str | None:
     )
 
 
+def _ladder_cause(normal: GcodeFile) -> str:
+    """What moved the Zs apart. Supports first: the spiral pass is never sliced with them."""
+    if supports_are_on(normal.config):
+        return (
+            "The normal pass was sliced with support material and the spiral vase pass cannot be, "
+            "because PrusaSlicer refuses that combination, and supports move the layer Zs. Turn "
+            "supports off for this plate."
+        )
+    return "Adaptive or variable layer height does this; slice at a fixed layer height."
+
+
 def _ladder_divergence(normal: GcodeFile, vase: GcodeFile, tail: str = "") -> str | None:
     """Why these two slices cannot be welded, if their Z ladders are not the same one."""
     a, b = _ladder(normal), _ladder(vase)
@@ -350,8 +363,7 @@ def _ladder_divergence(normal: GcodeFile, vase: GcodeFile, tail: str = "") -> st
             return (
                 f"{head}Layer {index} is Z {left:.3f} in the normal pass and "
                 f"Z {right:.3f} in the spiral vase pass. "
-                "Adaptive or variable layer height does this; slice at a fixed layer height."
-                f"{tail}"
+                f"{_ladder_cause(normal)}{tail}"
             )
     return (
         f"{head}The normal pass has {len(a)} layers and the spiral vase pass {len(b)}, "
@@ -408,9 +420,9 @@ def _run_auto(args: argparse.Namespace, out: "object") -> int:
     echo = out if args.verbose else None
 
     config = merged_config(project, load)
-    lost = unrecoverable_vase(config)
-    if lost is not None:
-        print(f"warning: {lost}", file=sys.stderr)
+    for warning in (unrecoverable_vase(config), dropped_supports(config)):
+        if warning is not None:
+            print(f"warning: {warning}", file=sys.stderr)
 
     with _SliceDir(args.keep_slices) as workdir:
         # said before the first pass runs, so a pass that fails still says where to look

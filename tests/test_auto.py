@@ -8,8 +8,9 @@ import pytest
 
 import vaseweld.slicer
 from conftest import FakePrusaSlicer, example, fixture, multi_material_3mf, project_3mf
-from vaseweld.cli import EXIT_OK, EXIT_USAGE, main
-from vaseweld.slicer import DOWNLOAD_URL, NORMAL_OVERRIDES, SPIRAL_VASE_OVERRIDES
+from vaseweld.cli import EXIT_OK, EXIT_USAGE, _ladder_divergence, main
+from vaseweld.parser import parse_file
+from vaseweld.slicer import DOWNLOAD_URL, SPIRAL_VASE_OVERRIDES
 
 PROJECT = "cylinder_6mm.3mf"
 
@@ -78,11 +79,18 @@ def test_both_passes_run_the_exact_command_line(fake_slicer, tmp_path, capsys):
     normal, vase = fake_slicer.slices
 
     assert normal[:4] == [str(fake_slicer.path), "--export-gcode", "--load", str(config)]
-    assert tuple(normal[4:5]) == NORMAL_OVERRIDES
-    assert normal[5] == "--output"
-    assert normal[6].endswith("cylinder_6mm-normal.gcode")
-    assert normal[7] == str(fixture(PROJECT))
-    assert len(normal) == 8
+    assert tuple(normal[4:10]) == (
+        "--spiral-vase=0",
+        "--perimeters=3",
+        "--top-solid-layers=3",
+        "--fill-density=20%",
+        "--retract-layer-change=0",
+        "--filament-retract-layer-change=nil",
+    )
+    assert normal[10] == "--output"
+    assert normal[11].endswith("cylinder_6mm-normal.gcode")
+    assert normal[12] == str(fixture(PROJECT))
+    assert len(normal) == 13
 
     assert vase[:4] == normal[:4]
     assert tuple(vase[4:11]) == SPIRAL_VASE_OVERRIDES
@@ -157,6 +165,28 @@ def test_slices_at_different_layer_heights_abort_instead_of_welding(fake_slicer,
     assert "Layer 1 is Z 0.200 in the normal pass and Z 0.300 in the spiral vase pass" in stderr[0]
     assert "fixed layer height" in stderr[0]
     assert not out.exists()
+
+
+def test_the_abort_blames_supports_when_the_normal_pass_had_them():
+    """Supports are what moved the Zs, and the spiral pass is never allowed to keep them."""
+    normal = parse_file(fixture("prusaslicer_normal_6mm.gcode"))
+    vase = parse_file(fixture("mismatch_layerheight_6mm.gcode"))
+    assert "fixed layer height" in _ladder_divergence(normal, vase)
+    normal.config["support_material"] = "1"
+    message = _ladder_divergence(normal, vase)
+    assert "sliced with support material" in message
+    assert "fixed layer height" not in message
+
+
+def test_a_profile_with_supports_on_is_warned_about_before_either_pass(
+    fake_slicer, tmp_path, capsys
+):
+    """Two passes take minutes and this one will almost certainly be refused after them."""
+    project = project_3mf(tmp_path, "supported.3mf", support_material="1")
+    argv = auto_argv(fake_slicer, tmp_path / "out.gcode", project=project)
+    code, _, stderr = run(argv, capsys)
+    assert code == EXIT_OK
+    assert "refuses to slice spiral vase with supports" in stderr[0]
 
 
 def test_a_second_pass_of_a_different_length_aborts_too(fake_slicer, tmp_path, capsys):

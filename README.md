@@ -112,6 +112,11 @@ The one case that cannot be rescued is a project saved *after* accepting PrusaSl
 adjust those settings" dialog. Those values are gone from the file, and nothing can recover what
 they were. `auto` says so and slices what the project now reads.
 
+Supports and `auto` do not mix. PrusaSlicer will not slice spiral vase with support material at
+all, so the spiral pass never has them while the normal pass does, and supports move the layer Zs
+that the two passes have to agree on. `auto` tells you before it starts slicing and refuses the
+weld if the ladders come out different. Turn supports off for a plate you want to weld.
+
 Without PrusaSlicer, or with OrcaSlicer or BambuStudio, slice the same plate twice yourself. Once
 with Spiral Vase off, once with it on. Do not move, rescale or reorient the object in between. Save
 both files, then:
@@ -419,7 +424,7 @@ cd vaseweld
 python -m pytest
 ```
 
-249 tests, about 45 seconds, no dependencies beyond pytest. One of them drives a real PrusaSlicer
+252 tests, about 45 seconds, no dependencies beyond pytest. One of them drives a real PrusaSlicer
 end to end and is skipped unless you set `VASEWELD_E2E=1`, so a machine without the slicer still
 runs the rest. Everything else runs against real slicer
 output committed under `tests/fixtures/`, produced by driving PrusaSlicer 2.9.6, OrcaSlicer 2.4.2

@@ -317,14 +317,38 @@ def merged_config(source: Path, load: tuple[Path, ...] = ()) -> dict[str, str]:
     return config
 
 
-def _vase_is_on(config: dict[str, str]) -> bool:
-    return config.get("spiral_vase", "0").strip() not in ("", "0", "false", "nil")
+def _is_on(value: str | None) -> bool:
+    return (value or "0").strip() not in ("", "0", "false", "nil")
+
+
+def supports_are_on(config: dict[str, str]) -> bool:
+    """Either key generates support material, and validate() refuses spiral vase with either."""
+    return _is_on(config.get("support_material")) or _is_on(
+        config.get("support_material_enforce_layers")
+    )
+
+
+def dropped_supports(config: dict[str, str]) -> str | None:
+    """Warn that the spiral pass loses the supports this profile asks for, before slicing twice."""
+    if not supports_are_on(config):
+        return None
+    return (
+        "this profile has support material on. PrusaSlicer refuses to slice spiral vase with "
+        "supports at all, so the spiral pass is sliced without them. Supports also move the layer "
+        "Zs, and the two passes have to agree on those, so this plate will probably be refused "
+        "after both passes have run. Turn supports off, or pass a profile with --load that has."
+    )
 
 
 def normal_overrides(config: dict[str, str]) -> tuple[str, ...]:
-    """Turn spiral vase off for the normal pass, and put back what normalize_fdm ate."""
-    if not _vase_is_on(config):
-        return NORMAL_OVERRIDES
+    """Turn spiral vase off for the normal pass, and put back what normalize_fdm ate.
+
+    Not gated on spiral vase being on in the merged config, because normalize runs as each
+    --load is read: `--load vase.ini --load off.ini` still slices at 1/0/0%, and the merged
+    config says the mode is off. What goes back is the config's own value, falling back to
+    the default an unnamed key resolves to anyway, so when nothing turned the mode on this
+    is a longer command line and the same G-code.
+    """
     restored = tuple(
         f"--{key.replace('_', '-')}={config.get(key) or default}" for key, default in VASE_CLOBBERED
     )
