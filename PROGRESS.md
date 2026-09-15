@@ -49,9 +49,9 @@ Everything below was executed on this machine against a real PrusaSlicer 2.9.6, 
   `PrusaSlicer not found. Pass --slicer-path, or install it from https://www.prusa3d.com/prusaslicer/`.
   Confirmed on this machine, where the only PrusaSlicer is a portable build outside every standard
   location.
-- **246 tests, 245 pass and one is skipped** unless `VASEWELD_E2E=1`. That one drives the real
+- **249 tests, 248 pass and one is skipped** unless `VASEWELD_E2E=1`. That one drives the real
   binary end to end; it passes here with `VASEWELD_SLICER` pointed at the portable build. 161 of the
-  246 predate this release and still pass unchanged.
+  249 predate this release and still pass unchanged.
 - **The published artefact was run, not just built.** `python -m build --wheel`, installed into a
   fresh venv, and `vaseweld auto examples/vase.3mf --at 6.0` run through the console entry point
   produced the same 21294-line file, which `vaseweld check` passes.
@@ -131,9 +131,9 @@ Everything below was executed on this machine against a real PrusaSlicer 2.9.6, 
     ini the normal pass came out with the filament key at 0 against 1 for a plain slice, 398 lines
     shorter, a retraction and its unretract missing at every one of 199 layer changes. Re-run with
     every key normalize is suspected of touching set to something non-default, the two footers now
-    differ in nothing at all, and the restored pass matches a plain slice line for line. It is only
-    handed back when the config named it, because a nullable option has no command line spelling
-    for "unset".
+    differ in nothing at all, and the restored pass matches a plain slice line for line. This pass
+    handed the key back only when the config named it, on the belief that a nullable option has no
+    command line spelling for "unset". It has one, and the sixth pass below corrects it.
   - `_extruders_used` only counted volumes that carry an `extruder` key, and PrusaSlicer writes one
     only for a volume someone assigned by hand. An object at extruder 2 with one volume pinned to 1
     and one left alone read as a single material, so a genuinely two-material plate cost two full
@@ -176,6 +176,32 @@ Everything below was executed on this machine against a real PrusaSlicer 2.9.6, 
     infill sections, and `auto` printed no warning at all. The flag is off and the settings are
     still the vase set, which is exactly the thing worth saying, so the check now looks at the
     settings rather than the flag and the wording follows.
+- **A sixth review pass found three, all of them real, and the first is a hole in the fourth
+  pass's own fix.**
+  - `filament_retract_layer_change` went back only when the config named it, and an ini exported
+    from PrusaSlicer does not name it: a nullable filament override that is unset is simply absent.
+    So the common case left normalize's `0` standing, and `0` at the filament level beats the
+    restored `--retract-layer-change=1`. `nil` is the command line spelling for unset, 2.9.6 takes
+    it, and the belief that it had none was wrong. Measured on `cylinder_40mm` with an ini holding
+    `retract_layer_change = 1` and nothing about the filament: the normal pass differed from a
+    plain slice of the same profile by 405 lines, a retraction and its unretract at all 134 layer
+    changes. With `nil` handed back the two toolpaths are identical, nothing to diff. Confirmed
+    again through `auto` itself: `--keep-slices` shows the normal pass now matching the plain slice
+    line for line, and the footer carries `filament_retract_layer_change = nil`. The key-by-key
+    matrix that settles the mechanism is worth keeping: printer 1 with filament unset retracts,
+    printer 0 does not, printer 1 with filament 0 does not, printer 0 with filament 1 does. The
+    filament value wins whichever way it points. A profile whose travel threshold is 0 retracts at
+    every travel anyway and shows none of this, which is what made the first attempt to measure it
+    come out blank.
+  - `_mode_divergence` had one branch for "both on" and used the other for everything else, so two
+    passes that came out the wrong way round were reported as "both passes were sliced with spiral
+    vase off (spiral_vase=1 and 0)", which contradicts its own numbers. That case now says the
+    normal pass came out as a vase and the spiral vase pass came out normal.
+  - `-o` into a directory that does not exist ran both passes in full and then failed to write,
+    which is the waste `preflight.py` exists to prevent. The destination is checked before the
+    first pass now, after the `--keep-slices` directory has been created, because `-o` inside the
+    directory you are keeping the slices in is a reasonable thing to ask for and refusing it would
+    have been a worse bug than the one being fixed.
 - **Clone check.** difflib over the line lists of every new function against all 112 functions in
   the package. The first pass put `probe_slicer` against `run_slice` at 38.2%: both built the same
   six-keyword `subprocess.run` call, and the review pass had just added `stdin=DEVNULL` to each of
@@ -190,7 +216,10 @@ Everything below was executed on this machine against a real PrusaSlicer 2.9.6, 
   sibling that only appends. The third pass added no functions at all, only changed existing ones,
   so there was nothing new to diff. The fourth added three, `_newest_first`, `_read_build` and
   `_extruder`, against 153 functions in the package: the highest is 13.3% and the two short ones
-  score 0% against everything, sharing not one line with anything else.
+  score 0% against everything, sharing not one line with anything else. The fifth added one,
+  `_is_part`, and the sixth one, `_reject_unwritable_output`, both scoring 0% against all 434
+  functions in the repository including the guard each sits next to. Their new tests peak at 46%
+  against the test they are modelled on, which is two assertions and a fixture edit in common.
 
 ## Verified working
 
@@ -209,7 +238,7 @@ Every claim below was executed on this machine, not inferred.
 - **Three delivery paths, byte-identical output.** Wheel installed into a clean venv, standalone
   `vaseweld.py`, and a PyInstaller `vaseweld.exe` built and run on Windows. All three produced
   sha256 `5c03b42c1bf4ac10...` for the same weld.
-- **The suite passes** with `python -m pytest`, 246 tests in about 45 seconds. That includes a
+- **The suite passes** with `python -m pytest`, 249 tests in about 45 seconds. That includes a
   matrix that welds all three slicers in both directions at two cut heights and runs `check` on
   every result.
 - **Three slicers, both directions, two cut heights.** All twelve welds pass `vaseweld check`.
