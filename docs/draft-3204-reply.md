@@ -43,6 +43,15 @@ comment resets it.
 - Klipper's planner runs on every push to main via `.github/workflows/simulate.yml`; the deposition
   measurement is `sim/analyse.py`.
 
+## Nothing in it claims hands-on printing
+
+The owner has no printer and said so in this thread on 2026-09-05, so the reply must not imply
+otherwise. An earlier version opened that paragraph with "one thing that bit me", which reads as
+hitting it on a print. It was found by diffing G-code, so it says that now. The closing line states
+outright that nobody has printed one. README.md and CHANGELOG.md were checked for the same class of
+claim and are clean; the README already says "See it without a printer" and "with no printer
+attached".
+
 ## Register
 
 The owner's own comment in this thread on 2026-09-05 was 619 characters, got no downvotes and drew
@@ -60,7 +69,7 @@ If you're splicing them by hand, you don't have to any more. 1.4.0 does the whol
 
 It runs PrusaSlicer twice itself, once normal and once in vase mode, then welds the two.
 
-One thing that bit me and would bite anyone doing it manually: ticking Spiral Vase in the GUI also
+I only caught this by diffing the two G-code files: ticking Spiral Vase in the GUI also
 flips six other settings, and it does that from a dialog that never runs headless. So a vase pass
 sliced from the command line with just --spiral-vase isn't the same toolpath the GUI gives you.
 2.9.x only for now, 3.0 rewrote the argument parsing.
