@@ -49,9 +49,9 @@ Everything below was executed on this machine against a real PrusaSlicer 2.9.6, 
   `PrusaSlicer not found. Pass --slicer-path, or install it from https://www.prusa3d.com/prusaslicer/`.
   Confirmed on this machine, where the only PrusaSlicer is a portable build outside every standard
   location.
-- **211 tests, 210 pass and one is skipped** unless `VASEWELD_E2E=1`. That one drives the real
+- **233 tests, 232 pass and one is skipped** unless `VASEWELD_E2E=1`. That one drives the real
   binary end to end; it passes here with `VASEWELD_SLICER` pointed at the portable build. 161 of the
-  211 predate this release and still pass unchanged.
+  233 predate this release and still pass unchanged.
 - **The published artefact was run, not just built.** `python -m build --wheel`, installed into a
   fresh venv, and `vaseweld auto examples/vase.3mf --at 6.0` run through the console entry point
   produced the same 21294-line file, which `vaseweld check` passes.
@@ -62,13 +62,53 @@ Everything below was executed on this machine against a real PrusaSlicer 2.9.6, 
   Before and after the extraction they are identical byte for byte. Re-recorded after the version
   bump, the 25 welded files differ by exactly one line each, the `; vaseweld 1.4.0` provenance
   comment, and all 72 transcripts still match.
-- **Clone check.** difflib over the line lists of every new function against all 108 functions in
+- **A review pass found five bugs the suite was green through, and each now has a test that fails
+  without its fix.** The two that mattered:
+  - The normal pass sent no `--spiral-vase` at all, so it inherited whatever the project or the
+    `--load` ini said. Reproduced against the real 2.9.6: with `spiral_vase = 1` in the ini the
+    "normal" slice came out carrying `; spiral_vase = 1` and three solid sections, which welds into
+    a file whose solid base is a single wall. Both Z ladders match, so nothing downstream catches
+    it. With `--spiral-vase=0` the same run gives `; spiral_vase = 0` and 55 solid sections.
+  - `run_slice` treated an existing output file as proof the pass worked. Two runs of
+    `--keep-slices` into the same directory, with the second failing, welded the first run's slices
+    and reported success. Each pass now deletes its target before launching.
+  The other three: volume extruder `0` means "inherit the default" and was being counted as a
+  second material; objects parked as not printable were counted as being on the plate, both of
+  which refused plates PrusaSlicer would happily slice; and a future 2.10.x would have been called
+  "older than the 2.9.x".
+- **A second review pass found four more, including one that made the first pass's headline fix
+  half a fix.** Same rule: each has a test proved to fail without it, by reverting that one change
+  and watching only its own tests go red.
+  - `--spiral-vase=0` turns the mode off but does not undo it. PrusaSlicer runs `normalize_fdm()`
+    over the loaded config before the command line overrides land, so the three keys it forces stay
+    forced. Measured on 2.9.6: a project holding `perimeters = 7`, `top_solid_layers = 4`,
+    `fill_density = 35%` sliced its normal pass at `1`, `0`, `0%`, giving 0 `;TYPE:Perimeter` and
+    0 `;TYPE:Internal infill` sections. Argument order makes no difference; passing the three values
+    back explicitly does, and reproduces a plain non-vase slice section for section. `auto` now
+    reads the project's embedded `Metadata/Slic3r_PE.config` and any `--load` ini over it, and hands
+    those three back. The same project now slices its normal pass with 29 perimeter and 22 internal
+    infill sections. Where the values in the file *are* the vase set, nothing can recover them and
+    `auto` says so instead of pretending.
+  - Dropping extruder `0` outright let a genuinely two-material plate through: one volume at `0`
+    beside one at `2` read as a single material. `0` means "inherit the object's extruder", so it
+    now resolves through the object-level value rather than being discarded.
+  - The Z-ladder abort always said "re-run with `--keep-slices`", and the line naming the directory
+    sat below the `raise`. Someone who had already passed it was told to do it again and never told
+    where to look.
+  - `--slicer-path` at a macOS `.app` was rejected, and the error suggested two Windows `.exe`
+    names on every platform.
+- **Clone check.** difflib over the line lists of every new function against all 112 functions in
   the package. The first pass put `probe_slicer` against `run_slice` at 38.2%: both built the same
   six-keyword `subprocess.run` call, and the review pass had just added `stdin=DEVNULL` to each of
   them by hand, which is exactly the drift the rule is there to catch. The call moved into
   `_capture` and each caller kept its own timeout message. The highest similarity anywhere is now
-  26.1%, `slicer_argv` against `run_slice`, which share only the argv they pass. Nothing else
-  clears 24%.
+  22.2%, `slicer_argv` against `run_slice`, which share only the argv they pass. Nothing else
+  clears 21%. Re-run over the second pass's new functions: the highest is `unrecoverable_vase`
+  against `_mode_divergence` at 26.1%. They both phrase a complaint about spiral vase and share
+  nothing else, one reading the config before slicing and one reading the G-code after, so they
+  stay apart. `multi_material_3mf` took an `extruders` argument rather than growing a near-copy for
+  the `(0, 2)` case, and `_replace_member` learned to add a missing member rather than gaining a
+  sibling that only appends.
 
 ## Verified working
 
@@ -87,7 +127,7 @@ Every claim below was executed on this machine, not inferred.
 - **Three delivery paths, byte-identical output.** Wheel installed into a clean venv, standalone
   `vaseweld.py`, and a PyInstaller `vaseweld.exe` built and run on Windows. All three produced
   sha256 `5c03b42c1bf4ac10...` for the same weld.
-- **The suite passes** with `python -m pytest`, 211 tests in about 45 seconds. That includes a
+- **The suite passes** with `python -m pytest`, 233 tests in about 45 seconds. That includes a
   matrix that welds all three slicers in both directions at two cut heights and runs `check` on
   every result.
 - **Three slicers, both directions, two cut heights.** All twelve welds pass `vaseweld check`.

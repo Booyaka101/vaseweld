@@ -1,11 +1,44 @@
 from __future__ import annotations
 
+import re
+import shutil
 import zipfile
 
 import pytest
 
-from conftest import example, fixture, multi_material_3mf
-from vaseweld.preflight import MODEL_CONFIG, PreflightError, check_plate, inspect_plate
+from conftest import _replace_member, example, fixture, multi_material_3mf
+from vaseweld.preflight import (
+    MODEL_CONFIG,
+    MODEL_FILE,
+    PreflightError,
+    check_plate,
+    inspect_plate,
+)
+
+ITEM = '  <item objectid="1" transform="1 0 0 0 1 0 0 0 1 125 105 0" printable="1"/>\n'
+SECOND = '  <item objectid="2" transform="1 0 0 0 1 0 0 0 1 90 105 0" printable="1"/>\n'
+PARKED = '  <item objectid="9" transform="1 0 0 0 1 0 0 0 1 90 105 0" printable="0"/>\n'
+
+
+def _with_build(tmp_path, name, items):
+    """cylinder_6mm.3mf rebuilt with these build items, one <object> in the config per item."""
+    source, destination = fixture("cylinder_6mm.3mf"), tmp_path / name
+    shutil.copyfile(source, destination)
+
+    model = zipfile.ZipFile(source).read(MODEL_FILE).decode()
+    model = re.sub(r"<build>.*</build>", f"<build>\n{items} </build>", model, flags=re.S)
+    _replace_member(destination, MODEL_FILE, model)
+
+    config = zipfile.ZipFile(source).read(MODEL_CONFIG).decode()
+    head, body = config.split(" <object", 1)
+    body = " <object" + body[: body.index("</config>")]
+    ids = re.findall(r'objectid="(\d+)"', items)
+    _replace_member(
+        destination,
+        MODEL_CONFIG,
+        head + "".join(body.replace('id="1"', f'id="{n}"', 1) for n in ids) + "</config>\n",
+    )
+    return destination
 
 
 def test_a_single_object_project_is_accepted():
@@ -58,3 +91,40 @@ def test_a_3mf_without_the_slic3r_config_falls_back_to_the_build_items(tmp_path)
     assert plate.instances == 2
     with pytest.raises(PreflightError, match="2 objects"):
         check_plate(stripped)
+
+
+def test_the_default_extruder_is_not_a_second_material(tmp_path):
+    """PrusaSlicer writes extruder 0 for "inherit the default", not for a second tool."""
+    source, destination = fixture("cylinder_6mm.3mf"), tmp_path / "default_extruder.3mf"
+    config = zipfile.ZipFile(source).read(MODEL_CONFIG).decode()
+    config = config.replace(
+        "  </volume>", '   <metadata type="volume" key="extruder" value="0"/>\n  </volume>'
+    ).replace("  <volume", '  <metadata type="object" key="extruder" value="1"/>\n  <volume')
+    shutil.copyfile(source, destination)
+    _replace_member(destination, MODEL_CONFIG, config)
+    assert check_plate(destination).extruders == frozenset({1})
+
+
+def test_an_object_parked_as_not_printable_is_not_on_the_plate(tmp_path):
+    plate = check_plate(_with_build(tmp_path, "parked.3mf", ITEM + PARKED))
+    assert (plate.objects, plate.instances) == (1, 1)
+
+
+def test_a_plate_with_nothing_printable_says_so(tmp_path):
+    with pytest.raises(PreflightError) as excinfo:
+        check_plate(_with_build(tmp_path, "empty.3mf", PARKED))
+    assert "nothing on it set to print" in str(excinfo.value)
+
+
+def test_two_printable_objects_are_still_two_objects(tmp_path):
+    with pytest.raises(PreflightError) as excinfo:
+        check_plate(_with_build(tmp_path, "pair.3mf", ITEM + SECOND))
+    assert "2 objects" in str(excinfo.value)
+
+
+def test_a_volume_left_at_the_default_beside_a_second_extruder_is_two_materials(tmp_path):
+    """extruder="0" means "whatever the object uses", so 0 and 2 are extruders 1 and 2."""
+    project = multi_material_3mf(tmp_path, extruders=(0, 2))
+    assert inspect_plate(project).extruders == frozenset({1, 2})
+    with pytest.raises(PreflightError, match="extruders 1, 2"):
+        check_plate(project)

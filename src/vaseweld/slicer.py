@@ -19,6 +19,7 @@ import shlex
 import shutil
 import subprocess
 import sys
+import zipfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import NamedTuple
@@ -42,12 +43,36 @@ SPIRAL_VASE_OVERRIDES = (
     "--thin-walls=0",
 )
 
+# Without this the normal pass inherits spiral_vase from the project or the --load ini, and
+# a plate saved with the checkbox already on slices both passes as a vase. The ladders match,
+# so nothing downstream notices, and the "solid base" is a single wall.
+NORMAL_OVERRIDES = ("--spiral-vase=0",)
+
+# ...but turning the mode off is not enough on its own. normalize_fdm() forces these three
+# the moment it sees spiral_vase, and on 2.9.6 it runs over the loaded config *before* the
+# command line overrides land, so --spiral-vase=0 alone still yields one perimeter, no infill
+# and no lid. Measured: a project holding perimeters=7/top_solid_layers=4/fill_density=35%
+# slices its normal pass at 1/0/0%. So read what the config meant and hand it back. The
+# fallbacks are 2.9.6's own defaults, for a config that never named the key.
+VASE_CLOBBERED = (("perimeters", "3"), ("top_solid_layers", "3"), ("fill_density", "20%"))
+
 VERIFIED_SERIES = (2, 9)
 REFACTORED_SERIES = (3, 0)
 
+PRINT_CONFIG = "Metadata/Slic3r_PE.config"
+
 _BANNER = re.compile(r"PrusaSlicer-(\d+)\.(\d+)\.(\d+)(\S*)")
 _EXE_NAMES = ("prusa-slicer-console.exe", "prusa-slicer", "prusa-slicer.exe", "PrusaSlicer")
+# --slicer-path at a .app is the natural thing to try on macOS; the binary is buried in it.
+_BUNDLE_BINARY = "Contents/MacOS/PrusaSlicer"
 _PROBE_TIMEOUT = 60.0
+# A project's embedded config uses the G-code footer's "; key = value"; an ini drops the ";".
+_SETTING = re.compile(r"^\s*(?:;\s*)?([a-z][a-z0-9_]*)\s*=\s*(.*?)\s*$")
+_VASE_FINGERPRINT = (
+    ("perimeters", ("1",)),
+    ("top_solid_layers", ("0",)),
+    ("fill_density", ("0", "0%")),
+)
 
 
 class SlicerError(Exception):
@@ -129,12 +154,12 @@ def find_slicer(explicit: Path | str | None = None) -> Path:
     if explicit is not None:
         path = Path(explicit)
         if path.is_dir():
-            for name in _EXE_NAMES:
+            for name in (_BUNDLE_BINARY, *_EXE_NAMES):
                 if (path / name).is_file():
                     return path / name
             raise SlicerError(
                 f"{path} is a directory with no PrusaSlicer binary in it. "
-                f"Point --slicer-path at one of {', '.join(_EXE_NAMES)}."
+                f"Point --slicer-path at {_binary_hint()}."
             )
         if not path.is_file():
             raise SlicerError(f"{path}: no such file. Check --slicer-path.")
@@ -152,6 +177,14 @@ def find_slicer(explicit: Path | str | None = None) -> Path:
     raise SlicerError(
         f"PrusaSlicer not found. Pass --slicer-path, or install it from {DOWNLOAD_URL}"
     )
+
+
+def _binary_hint() -> str:
+    if sys.platform == "win32":
+        return "prusa-slicer-console.exe"
+    if sys.platform == "darwin":
+        return f"PrusaSlicer.app, or the {_BUNDLE_BINARY} inside it"
+    return "prusa-slicer"
 
 
 def _capture(argv: list[str], timeout: float | None) -> subprocess.CompletedProcess:
@@ -211,9 +244,11 @@ def version_complaint(found: Slicer) -> VersionComplaint | None:
             fatal=True,
         )
     if found.series != VERIFIED_SERIES:
+        verified = f"{VERIFIED_SERIES[0]}.{VERIFIED_SERIES[1]}.x"
+        side = "older than" if found.series < VERIFIED_SERIES else "newer than"
         return VersionComplaint(
-            f"PrusaSlicer {found.version} is older than the "
-            f"{VERIFIED_SERIES[0]}.{VERIFIED_SERIES[1]}.x that vaseweld auto is verified against.",
+            f"PrusaSlicer {found.version} is {side} the {verified} "
+            "that vaseweld auto is verified against.",
             fatal=False,
         )
     return None
@@ -229,6 +264,58 @@ def _unidentified(found: Slicer) -> str:
         f"{found.path} does not identify itself as PrusaSlicer ({said}). "
         f"vaseweld auto drives PrusaSlicer "
         f"{VERIFIED_SERIES[0]}.{VERIFIED_SERIES[1]}.x only.{hint}"
+    )
+
+
+def print_config(path: Path) -> dict[str, str]:
+    """The print settings a project or a --load ini carries. Empty if it carries none."""
+    try:
+        if path.suffix.lower() == ".3mf":
+            with zipfile.ZipFile(path) as archive:
+                if PRINT_CONFIG not in archive.namelist():
+                    return {}
+                text = archive.read(PRINT_CONFIG).decode("utf-8", errors="replace")
+        else:
+            text = path.read_text(encoding="utf-8", errors="replace")
+    except (zipfile.BadZipFile, NotImplementedError, RuntimeError, OSError, ValueError):
+        return {}
+    found = (_SETTING.match(line) for line in text.splitlines())
+    return {m.group(1): m.group(2) for m in found if m}
+
+
+def merged_config(source: Path, load: tuple[Path, ...] = ()) -> dict[str, str]:
+    """What PrusaSlicer will end up loading. Each --load wins over the project."""
+    config = print_config(source)
+    for ini in load:
+        config.update(print_config(ini))
+    return config
+
+
+def _vase_is_on(config: dict[str, str]) -> bool:
+    return config.get("spiral_vase", "0").strip() not in ("", "0", "false", "nil")
+
+
+def normal_overrides(config: dict[str, str]) -> tuple[str, ...]:
+    """Turn spiral vase off for the normal pass, and put back what normalize_fdm ate."""
+    if not _vase_is_on(config):
+        return NORMAL_OVERRIDES
+    restored = tuple(
+        f"--{key.replace('_', '-')}={config.get(key) or default}" for key, default in VASE_CLOBBERED
+    )
+    return NORMAL_OVERRIDES + restored
+
+
+def unrecoverable_vase(config: dict[str, str]) -> str | None:
+    """Warn when the saved config *is* the vase set, so the base can only be a single wall."""
+    if not _vase_is_on(config):
+        return None
+    if any(config.get(key) not in vase for key, vase in _VASE_FINGERPRINT):
+        return None
+    return (
+        "this project was saved with spiral vase switched on, so it no longer records the "
+        "perimeter and infill settings it had before. The normal pass can only be sliced the "
+        "way the project reads now, which is a single wall with no infill. Untick Spiral Vase "
+        "in PrusaSlicer and save the project again, or pass a normal profile with --load."
     )
 
 
@@ -270,6 +357,12 @@ def run_slice(
     argv = slicer_argv(found, source, destination, overrides=overrides, load=load)
     if echo is not None:
         print(f"  $ {quoted(argv)}", file=echo)
+    # the file existing afterwards is the only proof a pass worked, so a leftover
+    # from an earlier --keep-slices run into the same directory has to go first
+    try:
+        destination.unlink(missing_ok=True)
+    except OSError as exc:
+        raise SlicerError(f"{destination}: cannot replace it ({exc.strerror or exc})") from exc
     try:
         done = _capture(argv, timeout)
     except subprocess.TimeoutExpired:

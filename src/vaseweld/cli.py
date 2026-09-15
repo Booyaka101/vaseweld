@@ -17,8 +17,11 @@ from .slicer import (
     SPIRAL_VASE_OVERRIDES,
     SlicerError,
     find_slicer,
+    merged_config,
+    normal_overrides,
     probe_slicer,
     run_slice,
+    unrecoverable_vase,
     version_complaint,
 )
 from .validate import check as run_check
@@ -308,7 +311,20 @@ def _weld_files(
     return EXIT_OK
 
 
-def _ladder_divergence(normal: GcodeFile, vase: GcodeFile) -> str | None:
+def _mode_divergence(normal: GcodeFile, vase: GcodeFile) -> str | None:
+    """The two passes are meant to differ in exactly one setting. Check PrusaSlicer agreed."""
+    modes = (normal.config.get("spiral_vase"), vase.config.get("spiral_vase"))
+    if None in modes or modes == ("0", "1"):
+        return None
+    both = "as a vase" if modes == ("1", "1") else "with spiral vase off"
+    return (
+        f"both passes were sliced {both} (spiral_vase={modes[0]} and {modes[1]}), so there is "
+        "nothing to weld. PrusaSlicer did not take the override; run with --verbose to see the "
+        "command line it was given."
+    )
+
+
+def _ladder_divergence(normal: GcodeFile, vase: GcodeFile, tail: str = "") -> str | None:
     """Why these two slices cannot be welded, if their Z ladders are not the same one."""
     a, b = _ladder(normal), _ladder(vase)
     if a == b:
@@ -317,7 +333,6 @@ def _ladder_divergence(normal: GcodeFile, vase: GcodeFile) -> str | None:
         "the two slices disagree about layer Z, so welding them would produce a "
         "plausible-looking file that does not print. "
     )
-    tail = " Re-run with --keep-slices to look at both passes."
     for index, (left, right) in enumerate(zip(a, b), start=1):
         if left != right:
             return (
@@ -380,12 +395,17 @@ def _run_auto(args: argparse.Namespace, out: "object") -> int:
     print(plate.describe(), file=out)
     echo = out if args.verbose else None
 
+    config = merged_config(project, load)
+    lost = unrecoverable_vase(config)
+    if lost is not None:
+        print(f"warning: {lost}", file=sys.stderr)
+
     with _SliceDir(args.keep_slices) as workdir:
         normal_path = workdir / f"{project.stem}-normal.gcode"
         vase_path = workdir / f"{project.stem}-spiral.gcode"
         for step, (destination, overrides, label) in enumerate(
             (
-                (normal_path, (), "normal"),
+                (normal_path, normal_overrides(config), "normal"),
                 (vase_path, SPIRAL_VASE_OVERRIDES, "spiral vase"),
             ),
             start=1,
@@ -402,14 +422,21 @@ def _run_auto(args: argparse.Namespace, out: "object") -> int:
                 echo=echo,
             )
 
+        # said before the checks below, so an abort still tells the user where to look
+        if args.keep_slices is not None:
+            print(f"kept both slices in {workdir}", file=out)
+
         normal, vase = parse_file(normal_path), parse_file(vase_path)
-        divergence = _ladder_divergence(normal, vase)
+        look = (
+            f" Both passes are in {workdir}."
+            if args.keep_slices is not None
+            else " Re-run with --keep-slices to look at both passes."
+        )
+        divergence = _ladder_divergence(normal, vase, look) or _mode_divergence(normal, vase)
         if divergence is not None:
             raise WeldError(divergence)
         for line in _ladder_report(vase, project.name):
             print(line, file=out)
-        if args.keep_slices is not None:
-            print(f"kept both slices in {workdir}", file=out)
         return _weld_files(args, out, normal, vase, output)
 
 

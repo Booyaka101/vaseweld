@@ -23,8 +23,11 @@ MODEL_CONFIG = "Metadata/Slic3r_PE_model.config"
 MODEL_FILE = "3D/3dmodel.model"
 
 _OBJECT = re.compile(r'<object\b[^>]*\binstances_count="(\d+)"')
-_BUILD_ITEM = re.compile(r"<item\b[^>]*objectid=\"(\d+)\"")
-_EXTRUDER = re.compile(r'<metadata\b[^>]*\bkey="extruder"[^>]*\bvalue="(\d+)"')
+_BUILD_ITEM = re.compile(r'<item\b[^>]*?\bobjectid="(\d+)"[^>]*>')
+_UNPRINTABLE = re.compile(r'\bprintable="0"')
+_EXTRUDER = re.compile(
+    r'<metadata\b[^>]*\btype="(object|volume)"[^>]*\bkey="extruder"[^>]*\bvalue="(\d+)"'
+)
 
 
 class PreflightError(Exception):
@@ -70,17 +73,38 @@ def inspect_plate(path: Path) -> Plate:
         ) from exc
 
     counts = [int(n) for n in _OBJECT.findall(config)]
-    items = _BUILD_ITEM.findall(model)
-    objects = len(counts) or len(set(items)) or 1
-    instances = sum(counts) if counts else (len(items) or 1)
-    extruders = frozenset(int(n) for n in _EXTRUDER.findall(config))
+    live = _printable_items(model)
+    if live is None:
+        objects = len(counts) or 1
+        instances = sum(counts) or 1
+    else:
+        instances = len(live)
+        # the config groups copies under one <object>, the build lists them one per <item>,
+        # so only the config can tell "two objects" from "two copies of one"
+        objects = 1 if len(counts) == 1 and instances > 1 else len(set(live)) or len(counts) or 1
     return Plate(
         path=path,
         objects=objects,
         instances=instances,
-        extruders=extruders,
+        extruders=_extruders_used(config),
         inspected=True,
     )
+
+
+def _extruders_used(config: str) -> frozenset[int]:
+    """The extruders the volumes actually print with, resolved through the object default."""
+    assigned = [(scope, int(n)) for scope, n in _EXTRUDER.findall(config)]
+    # 0 means "inherit", so a volume at 0 beside a volume at 2 is still two materials
+    default = next((n for scope, n in assigned if scope == "object" and n), 1)
+    return frozenset(n or default for scope, n in assigned if scope == "volume")
+
+
+def _printable_items(model: str) -> list[str] | None:
+    """Object ids of the instances actually set to print, or None if there is no build section."""
+    items = [(m.group(1), m.group(0)) for m in _BUILD_ITEM.finditer(model)]
+    if not items:
+        return None
+    return [objectid for objectid, tag in items if not _UNPRINTABLE.search(tag)]
 
 
 def _read_member(archive: zipfile.ZipFile, name: str, names: set[str]) -> str:
@@ -92,6 +116,11 @@ def _read_member(archive: zipfile.ZipFile, name: str, names: set[str]) -> str:
 def check_plate(path: Path) -> Plate:
     """Raise PreflightError unless this project is a single-material single object."""
     plate = inspect_plate(path)
+    if plate.instances < 1:
+        raise PreflightError(
+            f"{plate.path.name} has nothing on it set to print. "
+            "Set the object printable in PrusaSlicer and save the project again."
+        )
     if plate.instances > 1 or plate.objects > 1:
         what = (
             f"{plate.objects} objects"
