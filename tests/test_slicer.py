@@ -250,6 +250,7 @@ def test_a_vase_project_hands_back_what_normalize_would_eat(tmp_path):
         "--top-solid-layers=4",
         "--fill-density=35%",
         "--retract-layer-change=0",
+        "--filament-retract-layer-change=nil",
     )
 
 
@@ -375,12 +376,17 @@ def test_the_filament_level_retraction_override_is_put_back_as_well(tmp_path):
     )
 
 
-def test_a_filament_override_the_config_never_set_is_not_invented(tmp_path):
-    """It is nullable, and the command line has no spelling for "unset"."""
+def test_a_filament_override_the_config_never_set_is_handed_back_as_nil(tmp_path):
+    """Leaving it out leaves normalize's 0 in place, and 0 at the filament level wins.
+
+    Measured on 2.9.6 over cylinder_40mm: without this the normal pass differs from a
+    plain slice of the same profile by 405 lines, a retraction and its unretract at
+    every layer change. "nil" is the spelling for the unset the profile had.
+    """
     ini = tmp_path / "vase.ini"
     ini.write_text("spiral_vase = 1\nretract_layer_change = 1\n", encoding="utf-8")
     overrides = normal_overrides(merged_config(fixture(PROJECT), (ini,)))
-    assert not any(o.startswith("--filament-retract-layer-change") for o in overrides)
+    assert "--filament-retract-layer-change=nil" in overrides
 
 
 def test_a_bare_mesh_is_never_opened_looking_for_settings(tmp_path, monkeypatch):

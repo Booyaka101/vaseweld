@@ -23,23 +23,29 @@
   upstream, so `auto` refuses to drive a 3.x build unless you pass `--force-slicer-version`. Older
   builds warn and carry on.
 - PrusaSlicer exits 0 and writes nothing when a slice fails, so the return code alone proves nothing.
-  `auto` checks the file exists and reports the last line PrusaSlicer printed when it does not.
+  `auto` checks the file exists and reports the last line PrusaSlicer printed when it does not. An
+  `-o` that cannot be written, into a directory that is not there or onto a directory itself, is
+  refused before the first pass rather than after both.
 - The normal pass really is a normal pass. Passing `--spiral-vase=0` turns the mode off, but when
   spiral vase arrives through `--load` PrusaSlicer folds it into the config before it looks at the
   command line, so an ini holding `perimeters = 3`, `top_solid_layers = 5`, `fill_density = 20%`
   still sliced its normal pass at `1`, `0`, `0%` with 0 perimeter and 0 infill sections: a hollow
   single-wall base, which is the one thing the weld exists to avoid. Layer-change retraction goes
   the same way at both the printer and the filament level, worth a retraction at every layer change
-  on a profile that does not already retract before travel. `auto` now reads the project's own print
-  settings, layers any `--load` ini over them the way PrusaSlicer does, and hands those five values
-  back explicitly, which reproduces a plain non-vase slice line for line. A `.3mf` project's
+  on a profile that does not already retract before travel. The filament one is the one that
+  matters, because where the two disagree the filament value wins, and an ini exported from
+  PrusaSlicer never mentions it: an override nobody set is simply absent. `auto` now reads the
+  project's own print settings, layers any `--load` ini over them the way PrusaSlicer does, and
+  hands those five values back explicitly, the filament override as `nil` where the profile never
+  set it, which reproduces a plain non-vase slice line for line. A `.3mf` project's
   embedded settings turn out not to be clobbered like this, so for a project the overrides hand back
   what the file already said. Where the project was saved after accepting PrusaSlicer's "shall I
   adjust those settings" dialog the originals are gone from the file, and `auto` says so rather
   than pretending otherwise. It says it whenever the settings it is handed are the vase set, not
   only when the flag is still on, because an ini that turns the mode off and changes nothing else
   leaves exactly the same single-wall base. As a backstop it also reads `spiral_vase` back out of
-  both sliced files and refuses to weld two passes that came out in the same mode.
+  both sliced files and refuses to weld two passes that came out in the same mode, or the wrong way
+  round.
 - A plate is counted the way PrusaSlicer counts it. Objects parked as not printable are not on the
   plate, and volume extruder `0` means "inherit the object's extruder" rather than a second
   material, so neither is refused any more. A volume left at `0`, or carrying no extruder key at

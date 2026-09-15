@@ -313,6 +313,26 @@ def test_a_second_run_into_the_same_kept_directory_does_not_reuse_the_first(
     assert not (tmp_path / "b.gcode").exists()
 
 
+def test_an_output_directory_that_is_not_there_is_caught_before_slicing(
+    fake_slicer, tmp_path, capsys
+):
+    """Two slicing passes take minutes. Finding out afterwards that -o cannot be written is waste."""
+    argv = auto_argv(fake_slicer, tmp_path / "nope" / "out.gcode")
+    code, _, stderr = run(argv, capsys)
+    assert code == EXIT_USAGE
+    assert "no such directory" in stderr[0]
+    assert fake_slicer.slices == []
+
+
+def test_an_output_that_is_a_directory_is_caught_before_slicing(fake_slicer, tmp_path, capsys):
+    existing = tmp_path / "out"
+    existing.mkdir()
+    code, _, stderr = run(auto_argv(fake_slicer, existing), capsys)
+    assert code == EXIT_USAGE
+    assert "is a directory" in stderr[0]
+    assert fake_slicer.slices == []
+
+
 def test_two_passes_in_the_same_mode_are_refused_rather_than_welded(fake_slicer, tmp_path, capsys):
     """If PrusaSlicer ever ignored the override, the ladders would still match."""
     fake_slicer.normal = fake_slicer.vase
@@ -320,6 +340,17 @@ def test_two_passes_in_the_same_mode_are_refused_rather_than_welded(fake_slicer,
     assert code == EXIT_USAGE
     assert "both passes were sliced as a vase" in stderr[0]
     assert "--verbose" in stderr[0]
+
+
+def test_passes_that_come_out_the_wrong_way_round_are_described_that_way(
+    fake_slicer, tmp_path, capsys
+):
+    """Neither pass is "both", and saying spiral vase is off beside spiral_vase=1 helps nobody."""
+    fake_slicer.normal, fake_slicer.vase = fake_slicer.vase, fake_slicer.normal
+    code, _, stderr = run(auto_argv(fake_slicer, tmp_path / "out.gcode"), capsys)
+    assert code == EXIT_USAGE
+    assert "the normal pass came out as a vase" in stderr[0]
+    assert "spiral_vase=1 and 0" in stderr[0]
 
 
 def test_the_abort_points_at_the_slices_when_they_were_already_kept(fake_slicer, tmp_path, capsys):

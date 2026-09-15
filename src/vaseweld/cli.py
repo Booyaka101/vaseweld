@@ -227,6 +227,14 @@ def _reject_bgcode_output(output: Path) -> None:
     )
 
 
+def _reject_unwritable_output(output: Path) -> None:
+    """auto spends two slicing runs before it writes anything, so look at the target first."""
+    if output.is_dir():
+        raise GcodeError(f"{output} is a directory. Give -o a file name.")
+    if not output.parent.is_dir():
+        raise GcodeError(f"{output}: cannot write (no such directory {output.parent})")
+
+
 def _resolve_inputs(args: argparse.Namespace) -> tuple[Path, Path, Path]:
     """Work out the two inputs and the destination, honouring a trailing hook file."""
     normal, vase, output = args.normal, args.vase, args.output
@@ -316,11 +324,15 @@ def _mode_divergence(normal: GcodeFile, vase: GcodeFile) -> str | None:
     modes = (normal.config.get("spiral_vase"), vase.config.get("spiral_vase"))
     if None in modes or modes == ("0", "1"):
         return None
-    both = "as a vase" if modes == ("1", "1") else "with spiral vase off"
+    if modes == ("1", "0"):
+        what = "the normal pass came out as a vase and the spiral vase pass came out normal"
+    else:
+        both = "as a vase" if modes == ("1", "1") else "with spiral vase off"
+        what = f"both passes were sliced {both}"
     return (
-        f"both passes were sliced {both} (spiral_vase={modes[0]} and {modes[1]}), so there is "
-        "nothing to weld. PrusaSlicer did not take the override; run with --verbose to see the "
-        "command line it was given."
+        f"{what} (spiral_vase={modes[0]} and {modes[1]}), so there is nothing to weld. "
+        "PrusaSlicer did not take the override; run with --verbose to see the command line "
+        "it was given."
     )
 
 
@@ -404,6 +416,8 @@ def _run_auto(args: argparse.Namespace, out: "object") -> int:
         # said before the first pass runs, so a pass that fails still says where to look
         if args.keep_slices is not None:
             print(f"keeping both slices in {workdir}", file=out)
+        # after the workdir exists, because -o inside --keep-slices is a reasonable thing to ask for
+        _reject_unwritable_output(output)
         normal_path = workdir / f"{project.stem}-normal.gcode"
         vase_path = workdir / f"{project.stem}-spiral.gcode"
         for step, (destination, overrides, label) in enumerate(

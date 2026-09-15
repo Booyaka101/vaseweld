@@ -57,14 +57,14 @@ NORMAL_OVERRIDES = ("--spiral-vase=0",)
 # a no-op that hands back what the file already said. Both retraction keys matter: the filament
 # one overrides the printer one where it is set, and losing either drops a retraction at every
 # layer change. Handing all five back reproduces a plain slice line for line.
-# A None default is a nullable filament override, which has no command line spelling for "unset",
-# so it goes back only when the config named it. The rest are 2.9.6's own defaults.
+# "nil" is how a nullable filament override spells "unset", which is what a profile that never
+# mentioned the key had. The rest are 2.9.6's own defaults.
 VASE_CLOBBERED = (
     ("perimeters", "3"),
     ("top_solid_layers", "3"),
     ("fill_density", "20%"),
     ("retract_layer_change", "0"),
-    ("filament_retract_layer_change", None),
+    ("filament_retract_layer_change", "nil"),
 )
 
 VERIFIED_SERIES = (2, 9)
@@ -326,9 +326,7 @@ def normal_overrides(config: dict[str, str]) -> tuple[str, ...]:
     if not _vase_is_on(config):
         return NORMAL_OVERRIDES
     restored = tuple(
-        f"--{key.replace('_', '-')}={config.get(key) or default}"
-        for key, default in VASE_CLOBBERED
-        if default is not None or config.get(key)
+        f"--{key.replace('_', '-')}={config.get(key) or default}" for key, default in VASE_CLOBBERED
     )
     return NORMAL_OVERRIDES + restored
 
