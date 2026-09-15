@@ -49,9 +49,9 @@ Everything below was executed on this machine against a real PrusaSlicer 2.9.6, 
   `PrusaSlicer not found. Pass --slicer-path, or install it from https://www.prusa3d.com/prusaslicer/`.
   Confirmed on this machine, where the only PrusaSlicer is a portable build outside every standard
   location.
-- **243 tests, 242 pass and one is skipped** unless `VASEWELD_E2E=1`. That one drives the real
+- **246 tests, 245 pass and one is skipped** unless `VASEWELD_E2E=1`. That one drives the real
   binary end to end; it passes here with `VASEWELD_SLICER` pointed at the portable build. 161 of the
-  243 predate this release and still pass unchanged.
+  246 predate this release and still pass unchanged.
 - **The published artefact was run, not just built.** `python -m build --wheel`, installed into a
   fresh venv, and `vaseweld auto examples/vase.3mf --at 6.0` run through the console entry point
   produced the same 21294-line file, which `vaseweld check` passes.
@@ -123,8 +123,8 @@ Everything below was executed on this machine against a real PrusaSlicer 2.9.6, 
   - `--keep-slices` printed the directory after both passes had finished, so the run that most
     needs the path, one where a pass failed, never printed it. It is printed before the first pass
     now.
-- **A fourth review pass found six, and two of them did not survive being measured.** The four
-  that did each have a test that fails without its fix.
+- **A fourth review pass found six.** Four were fixed here, each with a test that fails without its
+  fix. One did not survive being measured. The sixth I rejected wrongly, and round five caught it.
   - `normalize_fdm` clobbers `filament_retract_layer_change` as well, and that nullable filament
     override beats `retract_layer_change` wherever it is set, so handing the printer key back did
     not always restore the retraction. Measured on 2.9.6 with an ini setting both: through the vase
@@ -147,13 +147,35 @@ Everything below was executed on this machine against a real PrusaSlicer 2.9.6, 
     win and a vase project plus a normal ini would still slice a single wall. It does not win. An
     ini holding 3/5/20% over a project holding 7/4/35% slices at 3/5/20%, key by key, which is what
     `merged_config` already models.
-  - Not reproduced: that two objects with two copies each are reported as "4 objects". They are
-    reported as "2 objects, 4 instances" and refused as "a plate with 2 objects", which is right.
+  - Rejected wrongly: that two objects with two copies each are reported as "4 objects". The file I
+    built to disprove it gave its four build items objectids 1, 1, 2, 2, which is not how
+    PrusaSlicer writes a copy. A copy is its own `<object>` in the model, aliased to the first
+    one's mesh through `<components>`, with its own id and its own build item, while the config
+    still lists the object once. So the ids really are distinct and the count really was wrong.
+    Fixed in the fifth pass, against a file built the way `two_objects.3mf` is.
   - Fell out of measuring the first of those: PrusaSlicer ignores the first line of a project's
     `Metadata/Slic3r_PE.config`, which in a real project is the generator comment. A hand-built
     project that puts a setting on line one loses it silently. `project_3mf` already writes the
     header, so only the throwaway file used for the measurement was wrong, and the fixture now says
     why the line is there.
+- **A fifth review pass found three, all of them real.** Two are the counting bugs the fourth pass
+  got wrong or missed, and the third is a warning that stayed quiet in the case that needed it.
+  - Two objects with two copies each read as four objects. `two_objects.3mf` settles how PrusaSlicer
+    writes a copy: alias `<object>`s with their own ids pointing at the first one's mesh through
+    `<components>`, one build item each, and the config still listing the object once. So the ids
+    the config names are the objects and the rest are copies. A pair of pairs now reports
+    "2 objects, 4 instances" and is refused as "a plate with 2 objects", where before it claimed
+    four objects that are not there.
+  - A support enforcer counted as a second material. Modifiers, blockers, enforcers and negative
+    volumes carry no `extruder` key, and the fourth pass had just taught `_extruders_used` to give a
+    keyless volume the object's extruder. An object printed with extruder 2 and carrying one
+    enforcer read as extruders 1 and 2 and was refused outright. Only `ModelPart` volumes count now.
+  - `unrecoverable_vase` was gated on `spiral_vase` being on, so the one case that most needs it
+    said nothing: a project saved as a vase plus a `--load` ini holding only `spiral_vase = 0`.
+    Measured on 2.9.6, that pair slices its normal pass at `perimeters = 1` with 0 perimeter and 0
+    infill sections, and `auto` printed no warning at all. The flag is off and the settings are
+    still the vase set, which is exactly the thing worth saying, so the check now looks at the
+    settings rather than the flag and the wording follows.
 - **Clone check.** difflib over the line lists of every new function against all 112 functions in
   the package. The first pass put `probe_slicer` against `run_slice` at 38.2%: both built the same
   six-keyword `subprocess.run` call, and the review pass had just added `stdin=DEVNULL` to each of
@@ -187,7 +209,7 @@ Every claim below was executed on this machine, not inferred.
 - **Three delivery paths, byte-identical output.** Wheel installed into a clean venv, standalone
   `vaseweld.py`, and a PyInstaller `vaseweld.exe` built and run on Windows. All three produced
   sha256 `5c03b42c1bf4ac10...` for the same weld.
-- **The suite passes** with `python -m pytest`, 243 tests in about 45 seconds. That includes a
+- **The suite passes** with `python -m pytest`, 246 tests in about 45 seconds. That includes a
   matrix that welds all three slicers in both directions at two cut heights and runs `check` on
   every result.
 - **Three slicers, both directions, two cut heights.** All twelve welds pass `vaseweld check`.

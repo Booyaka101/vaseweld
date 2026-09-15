@@ -334,16 +334,20 @@ def normal_overrides(config: dict[str, str]) -> tuple[str, ...]:
 
 
 def unrecoverable_vase(config: dict[str, str]) -> str | None:
-    """Warn when the saved config *is* the vase set, so the base can only be a single wall."""
-    if not _vase_is_on(config):
-        return None
+    """Warn when the config *is* the vase set, so the base can only be a single wall.
+
+    Deliberately not gated on spiral_vase being on: a --load ini that only turns the
+    mode off leaves the settings exactly as they were, and that is the case worth
+    warning about.
+    """
     if any(config.get(key) not in vase for key, vase in _VASE_FINGERPRINT):
         return None
     return (
-        "this project was saved with spiral vase switched on, so it no longer records the "
-        "perimeter and infill settings it had before. The normal pass can only be sliced the "
-        "way the project reads now, which is a single wall with no infill. Untick Spiral Vase "
-        "in PrusaSlicer and save the project again, or pass a normal profile with --load."
+        "the settings coming in are the spiral vase set, one perimeter and no top layers or "
+        "infill. A project saved with spiral vase switched on no longer records what it had "
+        "before. The normal pass can only be sliced the way these read, which is a single wall "
+        "with no infill. Untick Spiral Vase in PrusaSlicer and save the project again, or pass "
+        "a normal profile with --load."
     )
 
 

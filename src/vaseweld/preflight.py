@@ -24,12 +24,13 @@ MODEL_CONFIG = "Metadata/Slic3r_PE_model.config"
 MODEL_FILE = "3D/3dmodel.model"
 _CHUNK = 1 << 20
 
-_OBJECT = re.compile(r'<object\b[^>]*\binstances_count="(\d+)"')
+_OBJECT = re.compile(r'<object\b[^>]*\bid="(\d+)"[^>]*\binstances_count="(\d+)"')
 _BUILD_ITEM = re.compile(r'<item\b[^>]*?\bobjectid="(\d+)"[^>]*>')
 _UNPRINTABLE = re.compile(r'\bprintable="0"')
 _OBJECT_BLOCK = re.compile(r"<object\b.*?(?=<object\b|\Z)", re.S)
 _VOLUME_BLOCK = re.compile(r"<volume\b.*?</volume>", re.S)
 _EXTRUDER = re.compile(r'<metadata\b[^>]*\bkey="extruder"[^>]*\bvalue="(\d+)"')
+_VOLUME_TYPE = re.compile(r'<metadata\b[^>]*\bkey="volume_type"[^>]*\bvalue="(\w+)"')
 
 
 class PreflightError(Exception):
@@ -74,16 +75,17 @@ def inspect_plate(path: Path) -> Plate:
             "Re-save the project from PrusaSlicer, or pass the model file instead."
         ) from exc
 
-    counts = [int(n) for n in _OBJECT.findall(config)]
+    grouped = {objectid: int(n) for objectid, n in _OBJECT.findall(config)}
     live = _printable_items(model)
     if live is None:
-        objects = len(counts) or 1
-        instances = sum(counts) or 1
+        objects = len(grouped) or 1
+        instances = sum(grouped.values()) or 1
     else:
         instances = len(live)
-        # the config groups copies under one <object>, the build lists them one per <item>,
-        # so only the config can tell "two objects" from "two copies of one"
-        objects = 1 if len(counts) == 1 and instances > 1 else len(set(live)) or len(counts) or 1
+        # a copy gets its own <object> in the model, aliased to the first one's mesh, while the
+        # config lists it once. So the ids the config names are the objects and the rest are copies
+        named = {objectid for objectid in live if objectid in grouped}
+        objects = len(named) or len(set(live)) or len(grouped) or 1
     return Plate(
         path=path,
         objects=objects,
@@ -102,8 +104,15 @@ def _extruders_used(config: str) -> frozenset[int]:
         # A volume carrying no extruder key at all is the common case: PrusaSlicer only writes
         # one for a volume someone assigned by hand, so dropping those loses the second material.
         default = _extruder(head) or 1
-        used.update(_extruder(volume) or default for volume in _VOLUME_BLOCK.findall(block))
+        parts = [v for v in _VOLUME_BLOCK.findall(block) if _is_part(v)]
+        used.update(_extruder(volume) or default for volume in parts)
     return frozenset(used)
+
+
+def _is_part(volume: str) -> bool:
+    """Modifiers, blockers, enforcers and negative volumes lay no plastic of their own."""
+    found = _VOLUME_TYPE.search(volume)
+    return found is None or found.group(1) == "ModelPart"
 
 
 def _extruder(block: str) -> int:

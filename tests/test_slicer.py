@@ -291,6 +291,23 @@ def test_a_project_saved_with_the_checkbox_on_says_what_cannot_be_recovered(tmp_
     assert unrecoverable_vase(merged_config(intact)) is None
 
 
+def test_an_ini_that_only_turns_the_mode_off_does_not_recover_the_settings(tmp_path):
+    """Measured on 2.9.6: this pair slices at perimeters = 1, with no perimeter or infill sections."""
+    saved = project_3mf(
+        tmp_path,
+        "saved_vase.3mf",
+        spiral_vase="1",
+        perimeters="1",
+        top_solid_layers="0",
+        fill_density="0%",
+    )
+    off = tmp_path / "off.ini"
+    off.write_text("spiral_vase = 0\n", encoding="utf-8")
+    config = merged_config(saved, (off,))
+    assert config["spiral_vase"] == "0"
+    assert unrecoverable_vase(config) is not None
+
+
 def test_a_model_with_no_config_in_it_asks_for_nothing_back(tmp_path):
     """A plain mesh has no print settings, and a binary STL must not read as any."""
     assert merged_config(fixture("cylinder_6mm.3mf")) == {}
