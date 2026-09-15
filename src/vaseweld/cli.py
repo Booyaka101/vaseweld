@@ -246,15 +246,17 @@ def _reject_bgcode_output(output: Path) -> None:
     )
 
 
-def _reject_unwritable_output(output: Path, project: Path) -> None:
+def _reject_unwritable_output(output: Path, taken: tuple[tuple[Path, str], ...]) -> None:
     """auto spends two slicing runs before it writes anything, so look at the target first."""
     if output.is_dir():
         raise GcodeError(f"{output} is a directory. Give -o a file name.")
     if not output.parent.is_dir():
         raise GcodeError(f"{output}: cannot write (no such directory {output.parent})")
-    # samefile rather than ==, because the two spellings of one file differ on Windows
-    if output.exists() and output.samefile(project):
-        raise GcodeError(f"{output} is the project itself. Give -o a different name.")
+    # not samefile, which needs both to exist, and the two slices have not been written yet
+    spelling = os.path.normcase(os.path.realpath(output))
+    for path, what in taken:
+        if spelling == os.path.normcase(os.path.realpath(path)):
+            raise GcodeError(f"{output} is {what}. Give -o a different name.")
 
 
 def _resolve_inputs(args: argparse.Namespace) -> tuple[Path, Path, Path]:
@@ -450,10 +452,18 @@ def _run_auto(args: argparse.Namespace, out: "object") -> int:
         # said before the first pass runs, so a pass that fails still says where to look
         if args.keep_slices is not None:
             print(f"keeping both slices in {workdir}", file=out)
-        # after the workdir exists, because -o inside --keep-slices is a reasonable thing to ask for
-        _reject_unwritable_output(output, project)
         normal_path = workdir / f"{project.stem}-normal.gcode"
         vase_path = workdir / f"{project.stem}-spiral.gcode"
+        # after the workdir exists, because -o inside --keep-slices is a reasonable thing to ask for
+        _reject_unwritable_output(
+            output,
+            (
+                (project, "the project itself"),
+                *((config_file, "a --load config") for config_file in load),
+                (normal_path, "where the normal pass goes"),
+                (vase_path, "where the spiral vase pass goes"),
+            ),
+        )
         for step, (destination, overrides, label) in enumerate(
             (
                 (normal_path, normal_overrides(config), "normal"),

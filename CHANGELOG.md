@@ -30,8 +30,11 @@
   `-o` that cannot be written, into a directory that is not there or onto a directory itself, is
   refused before the first pass rather than after both, and so is a project that is a directory
   rather than a file, including `.` and a drive root, which used to reach a Python traceback. An
-  `-o` pointing at the project itself is refused as well: it used to overwrite the model with the
-  G-code sliced from it.
+  `-o` pointing at any of the run's own inputs is refused as well. It used to overwrite them: onto
+  the project it replaced the model with the G-code sliced from it, onto a `--load` ini it replaced
+  your settings the same way, and onto one of the two derived names under `--keep-slices` it left
+  the weld in place of the pass you asked to keep. `-o` anywhere else inside the kept directory
+  still works.
 - The normal pass really is a normal pass. Passing `--spiral-vase=0` turns the mode off, but when
   spiral vase arrives through `--load` PrusaSlicer folds it into the config before it looks at the
   command line, so an ini holding `perimeters = 3`, `top_solid_layers = 5`, `fill_density = 20%`
