@@ -44,6 +44,7 @@ from __future__ import annotations
 
 FOOTER = """
 
+
 if __name__ == "__main__":
     sys.exit(main())
 """

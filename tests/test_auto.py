@@ -188,7 +188,7 @@ def test_keep_slices_leaves_both_passes_on_disk(fake_slicer, tmp_path, capsys):
         "cylinder_6mm-normal.gcode",
         "cylinder_6mm-spiral.gcode",
     ]
-    assert f"kept both slices in {kept}" in stdout
+    assert f"keeping both slices in {kept}" in stdout
 
 
 def test_the_temporary_directory_does_not_survive(fake_slicer, tmp_path, capsys):
@@ -329,7 +329,7 @@ def test_the_abort_points_at_the_slices_when_they_were_already_kept(fake_slicer,
     argv = auto_argv(fake_slicer, tmp_path / "out.gcode", extra=["--keep-slices", str(kept)])
     code, stdout, stderr = run(argv, capsys)
     assert code == EXIT_USAGE
-    assert f"kept both slices in {kept}" in stdout
+    assert f"keeping both slices in {kept}" in stdout
     assert f"Both passes are in {kept}." in stderr[0]
     assert "Re-run with --keep-slices" not in stderr[0]
 
@@ -354,3 +354,16 @@ def test_a_vase_project_slices_its_normal_pass_with_the_settings_restored(
     assert "--top-solid-layers=4" in normal
     assert "--spiral-vase=0" in normal
     assert "--perimeters=1" in vase
+
+
+def test_a_failed_pass_still_says_where_the_slices_went(fake_slicer, tmp_path, capsys):
+    """--keep-slices exists for runs that go wrong, so the path has to survive one."""
+    kept = tmp_path / "slices"
+    fake_slicer.normal = None
+    fake_slicer.returncode = 1
+    fake_slicer.stderr = "Error: The supplied file could not be read\n"
+    argv = auto_argv(fake_slicer, tmp_path / "out.gcode", extra=["--keep-slices", str(kept)])
+    code, stdout, stderr = run(argv, capsys)
+    assert code == EXIT_USAGE
+    assert f"keeping both slices in {kept}" in stdout
+    assert "could not be read" in stderr[0]

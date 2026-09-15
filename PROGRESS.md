@@ -49,9 +49,9 @@ Everything below was executed on this machine against a real PrusaSlicer 2.9.6, 
   `PrusaSlicer not found. Pass --slicer-path, or install it from https://www.prusa3d.com/prusaslicer/`.
   Confirmed on this machine, where the only PrusaSlicer is a portable build outside every standard
   location.
-- **233 tests, 232 pass and one is skipped** unless `VASEWELD_E2E=1`. That one drives the real
+- **238 tests, 237 pass and one is skipped** unless `VASEWELD_E2E=1`. That one drives the real
   binary end to end; it passes here with `VASEWELD_SLICER` pointed at the portable build. 161 of the
-  233 predate this release and still pass unchanged.
+  238 predate this release and still pass unchanged.
 - **The published artefact was run, not just built.** `python -m build --wheel`, installed into a
   fresh venv, and `vaseweld auto examples/vase.3mf --at 6.0` run through the console entry point
   produced the same 21294-line file, which `vaseweld check` passes.
@@ -79,16 +79,18 @@ Everything below was executed on this machine against a real PrusaSlicer 2.9.6, 
 - **A second review pass found four more, including one that made the first pass's headline fix
   half a fix.** Same rule: each has a test proved to fail without it, by reverting that one change
   and watching only its own tests go red.
-  - `--spiral-vase=0` turns the mode off but does not undo it. PrusaSlicer runs `normalize_fdm()`
-    over the loaded config before the command line overrides land, so the three keys it forces stay
-    forced. Measured on 2.9.6: a project holding `perimeters = 7`, `top_solid_layers = 4`,
-    `fill_density = 35%` sliced its normal pass at `1`, `0`, `0%`, giving 0 `;TYPE:Perimeter` and
-    0 `;TYPE:Internal infill` sections. Argument order makes no difference; passing the three values
-    back explicitly does, and reproduces a plain non-vase slice section for section. `auto` now
-    reads the project's embedded `Metadata/Slic3r_PE.config` and any `--load` ini over it, and hands
-    those three back. The same project now slices its normal pass with 29 perimeter and 22 internal
-    infill sections. Where the values in the file *are* the vase set, nothing can recover them and
-    `auto` says so instead of pretending.
+  - `--spiral-vase=0` turns the mode off but does not always undo it. PrusaSlicer runs
+    `normalize_fdm()` over the loaded config before the command line overrides land, so the keys it
+    forces stay forced. The measurement first recorded here was wrong and the third pass below
+    corrects it: a `.3mf`'s embedded settings survive, it is a `--load` ini that loses them.
+    Measured on 2.9.6 through `--load`, an ini holding `perimeters = 3`, `top_solid_layers = 5`,
+    `fill_density = 20%` sliced its normal pass at `1`, `0`, `0%`, giving 0 `;TYPE:Perimeter` and
+    0 `;TYPE:Internal infill` sections. Argument order makes no difference; passing the values back
+    explicitly does, and reproduces a plain non-vase slice section for section. `auto` now reads
+    the project's embedded `Metadata/Slic3r_PE.config` and any `--load` ini over it, and hands them
+    back. The same run now slices its normal pass with 199 perimeter and 260 internal infill
+    sections. Where the values in the file *are* the vase set, nothing can recover them and `auto`
+    says so instead of pretending.
   - Dropping extruder `0` outright let a genuinely two-material plate through: one volume at `0`
     beside one at `2` read as a single material. `0` means "inherit the object's extruder", so it
     now resolves through the object-level value rather than being discarded.
@@ -97,6 +99,30 @@ Everything below was executed on this machine against a real PrusaSlicer 2.9.6, 
     where to look.
   - `--slicer-path` at a macOS `.app` was rejected, and the error suggested two Windows `.exe`
     names on every platform.
+- **A third review pass found five more.** Same rule again: revert the one change, watch only its
+  own tests go red.
+  - `normalize_fdm` eats layer-change retraction too, so the three settings handed back were three
+    of four. The numbers in the finding did not reproduce, and the real ones are narrower: on a
+    profile that retracts at a layer change anyway the key changes nothing, 200 retractions either
+    way and 0 differing lines over two models. Set `retract_before_travel = 100` so the profile
+    does not already retract and the normal pass drops from 200 retractions to 2, with 909 lines
+    different. Worth the fourth slot, but not for the reason reported.
+  - The second pass's headline measurement was overstated, and this pass caught it. A `.3mf`
+    project's embedded config is not clobbered by `normalize_fdm` at all: with `--spiral-vase=0`
+    alone the same kind of project slices its normal pass at `perimeters = 7`, the value it
+    carries. Only the `--load` path loses the settings. The code stands, because handing them back
+    is a no-op when the file already said them, but the README, the CHANGELOG and the comment now
+    say what actually happens rather than what I assumed generalised.
+  - One regex read both a project's `; key = value` block and a `--load` ini. In an ini `;` starts
+    a comment, so a commented-out `;fill_density = 0%` was read as a live setting and handed back
+    on the command line, which is worse than not reading the file at all. Two regexes now, one per
+    format.
+  - `merged_config` opened the source looking for print settings even when it was an STL, decoding
+    megabytes of geometry as text to find nothing. Only a `.3mf` carries settings, so only a `.3mf`
+    is opened.
+  - `--keep-slices` printed the directory after both passes had finished, so the run that most
+    needs the path, one where a pass failed, never printed it. It is printed before the first pass
+    now.
 - **Clone check.** difflib over the line lists of every new function against all 112 functions in
   the package. The first pass put `probe_slicer` against `run_slice` at 38.2%: both built the same
   six-keyword `subprocess.run` call, and the review pass had just added `stdin=DEVNULL` to each of
@@ -108,7 +134,8 @@ Everything below was executed on this machine against a real PrusaSlicer 2.9.6, 
   nothing else, one reading the config before slicing and one reading the G-code after, so they
   stay apart. `multi_material_3mf` took an `extruders` argument rather than growing a near-copy for
   the `(0, 2)` case, and `_replace_member` learned to add a missing member rather than gaining a
-  sibling that only appends.
+  sibling that only appends. The third pass added no functions at all, only changed existing ones,
+  so there was nothing new to diff.
 
 ## Verified working
 
@@ -127,7 +154,7 @@ Every claim below was executed on this machine, not inferred.
 - **Three delivery paths, byte-identical output.** Wheel installed into a clean venv, standalone
   `vaseweld.py`, and a PyInstaller `vaseweld.exe` built and run on Windows. All three produced
   sha256 `5c03b42c1bf4ac10...` for the same weld.
-- **The suite passes** with `python -m pytest`, 233 tests in about 45 seconds. That includes a
+- **The suite passes** with `python -m pytest`, 238 tests in about 45 seconds. That includes a
   matrix that welds all three slicers in both directions at two cut heights and runs `check` on
   every result.
 - **Three slicers, both directions, two cut heights.** All twelve welds pass `vaseweld check`.

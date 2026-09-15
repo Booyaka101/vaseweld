@@ -98,12 +98,14 @@ infill, supports and thin walls alongside it, from a dialog that never runs head
 passes the whole set on the command line. Slicing by hand with only the checkbox gives a slightly
 different toolpath.
 
-The normal pass has the opposite problem. `--spiral-vase=0` alone is not enough, because
-PrusaSlicer folds spiral vase into the loaded config before it reads the command line: a project
-holding `perimeters = 7` slices its normal pass at `perimeters = 1` even with the mode switched
-back off, which is a hollow single-wall base. So `auto` reads the project's own print settings and
-hands the three affected ones straight back. A project saved with the checkbox already on gets a
-real solid base, sliced the way its own profile says.
+The normal pass has the opposite problem, and `--spiral-vase=0` does not always undo it. When
+spiral vase arrives through `--load`, PrusaSlicer folds it into the config before it reads the
+command line, so an ini holding `perimeters = 3` slices the normal pass at `perimeters = 1` with
+the mode already switched back off: a hollow single-wall base, which is the one thing the weld
+exists to avoid. It also loses layer-change retraction the same way. A `.3mf` project's own
+settings are not touched like this, only a `--load` ini's. So `auto` reads whichever applies and
+hands the four affected settings back explicitly, which is a no-op for a project and the fix for
+an ini.
 
 The one case that cannot be rescued is a project saved *after* accepting PrusaSlicer's "shall I
 adjust those settings" dialog. Those values are gone from the file, and nothing can recover what
@@ -416,7 +418,7 @@ cd vaseweld
 python -m pytest
 ```
 
-233 tests, about 45 seconds, no dependencies beyond pytest. One of them drives a real PrusaSlicer
+238 tests, about 45 seconds, no dependencies beyond pytest. One of them drives a real PrusaSlicer
 end to end and is skipped unless you set `VASEWELD_E2E=1`, so a machine without the slicer still
 runs the rest. Everything else runs against real slicer
 output committed under `tests/fixtures/`, produced by driving PrusaSlicer 2.9.6, OrcaSlicer 2.4.2
