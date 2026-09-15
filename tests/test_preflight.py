@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 import shutil
+import tracemalloc
 import zipfile
 
 import pytest
@@ -128,3 +129,36 @@ def test_a_volume_left_at_the_default_beside_a_second_extruder_is_two_materials(
     assert inspect_plate(project).extruders == frozenset({1, 2})
     with pytest.raises(PreflightError, match="extruders 1, 2"):
         check_plate(project)
+
+
+def test_a_volume_with_no_extruder_key_at_all_still_counts(tmp_path):
+    """PrusaSlicer writes the key only for a volume someone assigned. The rest inherit."""
+    project = multi_material_3mf(tmp_path, extruders=(1, 2))
+    config = zipfile.ZipFile(project).read(MODEL_CONFIG).decode()
+    config = config.replace('   <metadata type="volume" key="extruder" value="2"/>\n', "")
+    config = config.replace(
+        "  <volume", '  <metadata type="object" key="extruder" value="2"/>\n  <volume', 1
+    )
+    _replace_member(project, MODEL_CONFIG, config)
+    assert inspect_plate(project).extruders == frozenset({1, 2})
+    with pytest.raises(PreflightError, match="extruders 1, 2"):
+        check_plate(project)
+
+
+def test_the_mesh_is_not_held_in_memory_to_read_the_build_section(tmp_path):
+    """The tag preflight wants is at the end of the model, and the mesh above it can be huge."""
+    source, destination = fixture("cylinder_6mm.3mf"), tmp_path / "big.3mf"
+    model = zipfile.ZipFile(source).read(MODEL_FILE).decode()
+    head, tail = model.split("<build>", 1)
+    mesh = '   <vertex x="1.234567" y="2.345678" z="3.456789"/>\n' * 600_000
+    shutil.copyfile(source, destination)
+    _replace_member(destination, MODEL_FILE, head + mesh + "<build>" + tail)
+
+    tracemalloc.start()
+    try:
+        plate = inspect_plate(destination)
+        peak = tracemalloc.get_traced_memory()[1]
+    finally:
+        tracemalloc.stop()
+    assert (plate.objects, plate.instances) == (1, 1)
+    assert peak < len(mesh) / 2

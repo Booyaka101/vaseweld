@@ -13,6 +13,7 @@ from vaseweld.slicer import (
     SPIRAL_VASE_OVERRIDES,
     Slicer,
     SlicerError,
+    _windows_candidates,
     find_slicer,
     merged_config,
     normal_overrides,
@@ -312,6 +313,17 @@ def test_a_directory_with_nothing_in_it_still_says_what_to_point_at(tmp_path):
     assert ".exe" in str(excinfo.value) or "prusa-slicer" in str(excinfo.value)
 
 
+def test_a_newer_install_is_tried_before_an_older_one(tmp_path, monkeypatch):
+    """2.10.0 ships eventually, and sorting the directory names as strings puts 2.9.6 first."""
+    for name in ("PrusaSlicer-2.9.6+win64", "PrusaSlicer-2.10.0+win64"):
+        (tmp_path / name).mkdir()
+    monkeypatch.setenv("ProgramFiles", str(tmp_path))
+    for other in ("ProgramFiles(x86)", "ProgramW6432", "LOCALAPPDATA"):
+        monkeypatch.setenv(other, "")
+    names = [path.parent.name for path in _windows_candidates()]
+    assert names.index("PrusaSlicer-2.10.0+win64") < names.index("PrusaSlicer-2.9.6+win64")
+
+
 def test_a_commented_out_line_in_an_ini_is_not_a_setting(tmp_path):
     """PrusaSlicer treats ";" as a comment in an ini, so reading one as live would fight it."""
     ini = tmp_path / "print.ini"
@@ -332,6 +344,26 @@ def test_layer_change_retraction_is_put_back_too(tmp_path):
     ini = tmp_path / "vase.ini"
     ini.write_text("spiral_vase = 1\nretract_layer_change = 1\n", encoding="utf-8")
     assert "--retract-layer-change=1" in normal_overrides(merged_config(fixture(PROJECT), (ini,)))
+
+
+def test_the_filament_level_retraction_override_is_put_back_as_well(tmp_path):
+    """It beats retract_layer_change where it is set, and normalize turns it off too."""
+    ini = tmp_path / "vase.ini"
+    ini.write_text(
+        "spiral_vase = 1\nretract_layer_change = 1\nfilament_retract_layer_change = 1\n",
+        encoding="utf-8",
+    )
+    assert "--filament-retract-layer-change=1" in normal_overrides(
+        merged_config(fixture(PROJECT), (ini,))
+    )
+
+
+def test_a_filament_override_the_config_never_set_is_not_invented(tmp_path):
+    """It is nullable, and the command line has no spelling for "unset"."""
+    ini = tmp_path / "vase.ini"
+    ini.write_text("spiral_vase = 1\nretract_layer_change = 1\n", encoding="utf-8")
+    overrides = normal_overrides(merged_config(fixture(PROJECT), (ini,)))
+    assert not any(o.startswith("--filament-retract-layer-change") for o in overrides)
 
 
 def test_a_bare_mesh_is_never_opened_looking_for_settings(tmp_path, monkeypatch):
