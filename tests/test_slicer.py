@@ -14,6 +14,7 @@ from vaseweld.slicer import (
     Slicer,
     SlicerError,
     _windows_candidates,
+    dropped_supports,
     find_slicer,
     merged_config,
     normal_overrides,
@@ -254,16 +255,26 @@ def test_a_vase_project_hands_back_what_normalize_would_eat(tmp_path):
     )
 
 
-def test_a_project_that_was_never_a_vase_keeps_its_own_settings(tmp_path):
+def test_a_project_that_was_never_a_vase_is_handed_back_its_own_settings(tmp_path):
+    """Restoring runs unconditionally, so a plain project gets its own values and the defaults."""
     project = project_3mf(tmp_path, "plain.3mf", spiral_vase="0", perimeters="7")
-    assert normal_overrides(merged_config(project)) == NORMAL_OVERRIDES
+    assert normal_overrides(merged_config(project)) == (
+        "--spiral-vase=0",
+        "--perimeters=7",
+        "--top-solid-layers=3",
+        "--fill-density=20%",
+        "--retract-layer-change=0",
+        "--filament-retract-layer-change=nil",
+    )
 
 
 def test_a_load_ini_wins_over_the_project_the_way_prusaslicer_reads_them(tmp_path):
     project = project_3mf(tmp_path, "vase.3mf", spiral_vase="1", perimeters="7")
     ini = tmp_path / "normal.ini"
     ini.write_text("spiral_vase = 0\nperimeters = 2\n", encoding="utf-8")
-    assert normal_overrides(merged_config(project, (ini,))) == NORMAL_OVERRIDES
+    overrides = normal_overrides(merged_config(project, (ini,)))
+    assert "--perimeters=2" in overrides
+    assert "--perimeters=7" not in overrides
 
 
 def test_a_vase_ini_over_a_plain_project_restores_the_projects_values(tmp_path):
@@ -274,6 +285,10 @@ def test_a_vase_ini_over_a_plain_project_restores_the_projects_values(tmp_path):
     assert "--perimeters=7" in overrides
     # never named in either file, so the only honest answer is PrusaSlicer's own default
     assert "--fill-density=20%" in overrides
+    off = tmp_path / "off.ini"
+    off.write_text("spiral_vase = 0\n", encoding="utf-8")
+    # normalize_fdm ran as vase.ini was read, so the mode being off by the end changes nothing
+    assert normal_overrides(merged_config(project, (ini, off))) == overrides
 
 
 def test_a_project_saved_with_the_checkbox_on_says_what_cannot_be_recovered(tmp_path):
@@ -309,12 +324,34 @@ def test_an_ini_that_only_turns_the_mode_off_does_not_recover_the_settings(tmp_p
     assert unrecoverable_vase(config) is not None
 
 
-def test_a_model_with_no_config_in_it_asks_for_nothing_back(tmp_path):
-    """A plain mesh has no print settings, and a binary STL must not read as any."""
+def test_a_profile_with_supports_on_is_told_the_spiral_pass_cannot_have_them(tmp_path):
+    """Measured on 2.9.6: supports on move the Zs, and both passes have to agree on those."""
+    plain = project_3mf(tmp_path, "plain.3mf", support_material="0")
+    assert dropped_supports(merged_config(plain)) is None
+    for key in ("support_material", "support_material_enforce_layers"):
+        project = project_3mf(tmp_path, f"{key}.3mf", **{key: "1"})
+        warning = dropped_supports(merged_config(project))
+        assert warning is not None
+        assert "refuses to slice spiral vase with supports" in warning
+
+
+def test_a_model_with_no_config_in_it_asks_for_the_slicers_own_defaults(tmp_path):
+    """A plain mesh has no print settings, and a binary STL must not read as any.
+
+    Measured on 2.9.6: slicing with no config at all and slicing with these five passed
+    explicitly give a 0-line body diff, which is what makes restoring unconditionally safe.
+    """
     assert merged_config(fixture("cylinder_6mm.3mf")) == {}
     stl = tmp_path / "cylinder.stl"
     stl.write_bytes(bytes([0]) + b"solid = nonsense" + bytes(range(256)) * 4)
-    assert normal_overrides(merged_config(stl)) == NORMAL_OVERRIDES
+    assert normal_overrides(merged_config(stl)) == (
+        "--spiral-vase=0",
+        "--perimeters=3",
+        "--top-solid-layers=3",
+        "--fill-density=20%",
+        "--retract-layer-change=0",
+        "--filament-retract-layer-change=nil",
+    )
 
 
 def test_a_macos_app_bundle_is_a_slicer_path_worth_accepting(tmp_path):

@@ -49,9 +49,9 @@ Everything below was executed on this machine against a real PrusaSlicer 2.9.6, 
   `PrusaSlicer not found. Pass --slicer-path, or install it from https://www.prusa3d.com/prusaslicer/`.
   Confirmed on this machine, where the only PrusaSlicer is a portable build outside every standard
   location.
-- **249 tests, 248 pass and one is skipped** unless `VASEWELD_E2E=1`. That one drives the real
+- **252 tests, 251 pass and one is skipped** unless `VASEWELD_E2E=1`. That one drives the real
   binary end to end; it passes here with `VASEWELD_SLICER` pointed at the portable build. 161 of the
-  249 predate this release and still pass unchanged.
+  252 predate this release and still pass unchanged.
 - **The published artefact was run, not just built.** `python -m build --wheel`, installed into a
   fresh venv, and `vaseweld auto examples/vase.3mf --at 6.0` run through the console entry point
   produced the same 21294-line file, which `vaseweld check` passes.
@@ -202,6 +202,31 @@ Everything below was executed on this machine against a real PrusaSlicer 2.9.6, 
     first pass now, after the `--keep-slices` directory has been created, because `-o` inside the
     directory you are keeping the slices in is a reasonable thing to ask for and refusing it would
     have been a worse bug than the one being fixed.
+- **A seventh review pass found two, both real, and the second is the worst bug of the loop.**
+  - `auto` never said anything about supports until both passes had already run. The spiral pass
+    cannot carry them, because `validate()` refuses spiral vase with support material at all, so it
+    is always sliced with `--support-material=0`. The normal pass keeps them, supports move the
+    layer Zs, and the two ladders then disagree. Measured on three support configurations, default
+    contact distance, `support_material_synchronize_layers = 1` and
+    `support_material_contact_distance = 0`: all three diverge. So two full slices bought an abort
+    whose message blamed adaptive layer height, which was not what happened. The profile is checked
+    before the first pass now and says what the spiral pass loses, and if it gets as far as the
+    ladder the abort names supports rather than adaptive layers.
+  - Handing the vase settings back was gated on the merged config saying spiral vase is on, and
+    `normalize_fdm` does not run once over the merged config. It runs as each `--load` file is read.
+    Measured on 2.9.6: `--load vase.ini --load off.ini`, where the second file holds nothing but
+    `spiral_vase = 0`, still slices at `perimeters = 1`, `top_solid_layers = 0`, `fill_density = 0%`
+    and both retraction keys at 0, a 41325-line body difference from a plain slice of the same
+    profile, while the merged config says the mode is off and the gate kept quiet. The gate is gone
+    and the settings go back every time. Two measurements say that is safe rather than merely
+    convenient: slicing with no config at all and slicing with the five defaults passed explicitly
+    give a 0-line body diff, so the fallbacks are 2.9.6's own built-ins; and the CLI does not
+    resolve `inherits`, so a key a `--load` ini never names really does resolve to the built-in
+    default and not to some parent preset's value. An ini holding only
+    `inherits = Original Prusa i3 MK2` slices at `retract_layer_change = 0` with an empty
+    `printer_model`, the parent ignored outright. Confirmed end to end on a plain profile that sets
+    `retract_layer_change = 1`: the normal pass now carries six overrides instead of one, keeps the
+    profile's own `1`, and its body matches a plain slice of the same file line for line.
 - **Clone check.** difflib over the line lists of every new function against all 112 functions in
   the package. The first pass put `probe_slicer` against `run_slice` at 38.2%: both built the same
   six-keyword `subprocess.run` call, and the review pass had just added `stdin=DEVNULL` to each of
@@ -219,7 +244,13 @@ Everything below was executed on this machine against a real PrusaSlicer 2.9.6, 
   score 0% against everything, sharing not one line with anything else. The fifth added one,
   `_is_part`, and the sixth one, `_reject_unwritable_output`, both scoring 0% against all 434
   functions in the repository including the guard each sits next to. Their new tests peak at 46%
-  against the test they are modelled on, which is two assertions and a fixture edit in common.
+  against the test they are modelled on, which is two assertions and a fixture edit in common. The
+  seventh added `supports_are_on`, `dropped_supports` and `_ladder_cause`, topping out at 24.0%,
+  `dropped_supports` against `unrecoverable_vase`: both return a sentence or `None` after reading
+  the config, and say entirely different things about entirely different keys. The truthiness rule
+  they share is real duplication, so it came out into `_is_on` rather than being written twice.
+  Removing the spiral vase gate left `_vase_is_on` with no callers and it is gone; ruff does not
+  flag a private module function nobody calls, so that one is on the reader.
 
 ## Verified working
 
@@ -238,7 +269,7 @@ Every claim below was executed on this machine, not inferred.
 - **Three delivery paths, byte-identical output.** Wheel installed into a clean venv, standalone
   `vaseweld.py`, and a PyInstaller `vaseweld.exe` built and run on Windows. All three produced
   sha256 `5c03b42c1bf4ac10...` for the same weld.
-- **The suite passes** with `python -m pytest`, 249 tests in about 45 seconds. That includes a
+- **The suite passes** with `python -m pytest`, 252 tests in about 45 seconds. That includes a
   matrix that welds all three slicers in both directions at two cut heights and runs `check` on
   every result.
 - **Three slicers, both directions, two cut heights.** All twelve welds pass `vaseweld check`.

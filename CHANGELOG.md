@@ -18,7 +18,10 @@
   two slicing runs.
 - Both passes are compared layer by layer before welding. If the two Z ladders differ at all, `auto`
   names the first layer that disagrees and stops, rather than producing a plausible-looking file that
-  does not print. Adaptive layer height is what causes this.
+  does not print. Adaptive layer height causes this, and so do supports. PrusaSlicer will not slice
+  spiral vase with support material at all, so the spiral pass never has them and the normal pass
+  does, which moves the Zs apart. A profile with supports on is told so before the first pass, and if
+  it gets as far as the ladder the abort names supports rather than guessing at layer height.
 - Versions other than 2.9.x are called out. 3.0.0-alpha11 refactored the whole command line parser
   upstream, so `auto` refuses to drive a 3.x build unless you pass `--force-slicer-version`. Older
   builds warn and carry on.
@@ -37,7 +40,12 @@
   PrusaSlicer never mentions it: an override nobody set is simply absent. `auto` now reads the
   project's own print settings, layers any `--load` ini over them the way PrusaSlicer does, and
   hands those five values back explicitly, the filament override as `nil` where the profile never
-  set it, which reproduces a plain non-vase slice line for line. A `.3mf` project's
+  set it, which reproduces a plain non-vase slice line for line. It hands them back on every run,
+  not only when the merged config still says spiral vase is on, because `normalize_fdm` runs as each
+  `--load` file is read rather than once at the end: a vase ini followed by an ini holding nothing
+  but `spiral_vase = 0` still slices at `1`, `0`, `0%`. When nothing turned the mode on, what goes
+  back is what the profile already said, or the slicer's own default for a key it never named, so
+  that run gets a longer command line and the same G-code. A `.3mf` project's
   embedded settings turn out not to be clobbered like this, so for a project the overrides hand back
   what the file already said. Where the project was saved after accepting PrusaSlicer's "shall I
   adjust those settings" dialog the originals are gone from the file, and `auto` says so rather
