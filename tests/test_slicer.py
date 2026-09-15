@@ -385,6 +385,15 @@ def test_a_newer_install_is_tried_before_an_older_one(tmp_path, monkeypatch):
     assert names.index("PrusaSlicer-2.10.0+win64") < names.index("PrusaSlicer-2.9.6+win64")
 
 
+def test_an_unset_localappdata_does_not_glob_the_working_directory(tmp_path, monkeypatch):
+    """os.path.join("", "Programs") is a truthy relative path, and glob would follow it from cwd."""
+    (tmp_path / "Programs" / "PrusaSlicer-2.9.6").mkdir(parents=True)
+    for name in ("ProgramFiles", "ProgramFiles(x86)", "ProgramW6432", "LOCALAPPDATA"):
+        monkeypatch.setenv(name, "")
+    monkeypatch.chdir(tmp_path)
+    assert _windows_candidates() == []
+
+
 def test_a_commented_out_line_in_an_ini_is_not_a_setting(tmp_path):
     """PrusaSlicer treats ";" as a comment in an ini, so reading one as live would fight it."""
     ini = tmp_path / "print.ini"

@@ -246,12 +246,15 @@ def _reject_bgcode_output(output: Path) -> None:
     )
 
 
-def _reject_unwritable_output(output: Path) -> None:
+def _reject_unwritable_output(output: Path, project: Path) -> None:
     """auto spends two slicing runs before it writes anything, so look at the target first."""
     if output.is_dir():
         raise GcodeError(f"{output} is a directory. Give -o a file name.")
     if not output.parent.is_dir():
         raise GcodeError(f"{output}: cannot write (no such directory {output.parent})")
+    # samefile rather than ==, because the two spellings of one file differ on Windows
+    if output.exists() and output.samefile(project):
+        raise GcodeError(f"{output} is the project itself. Give -o a different name.")
 
 
 def _resolve_inputs(args: argparse.Namespace) -> tuple[Path, Path, Path]:
@@ -448,7 +451,7 @@ def _run_auto(args: argparse.Namespace, out: "object") -> int:
         if args.keep_slices is not None:
             print(f"keeping both slices in {workdir}", file=out)
         # after the workdir exists, because -o inside --keep-slices is a reasonable thing to ask for
-        _reject_unwritable_output(output)
+        _reject_unwritable_output(output, project)
         normal_path = workdir / f"{project.stem}-normal.gcode"
         vase_path = workdir / f"{project.stem}-spiral.gcode"
         for step, (destination, overrides, label) in enumerate(

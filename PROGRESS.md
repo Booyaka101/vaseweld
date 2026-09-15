@@ -49,9 +49,9 @@ Everything below was executed on this machine against a real PrusaSlicer 2.9.6, 
   `PrusaSlicer not found. Pass --slicer-path, or install it from https://www.prusa3d.com/prusaslicer/`.
   Confirmed on this machine, where the only PrusaSlicer is a portable build outside every standard
   location.
-- **265 tests, 264 pass and one is skipped** unless `VASEWELD_E2E=1`. That one drives the real
+- **267 tests, 266 pass and one is skipped** unless `VASEWELD_E2E=1`. That one drives the real
   binary end to end; it passes here with `VASEWELD_SLICER` pointed at the portable build. 161 of the
-  265 predate this release and still pass unchanged.
+  267 predate this release and still pass unchanged.
 - **The published artefact was run, not just built.** `python -m build --wheel`, installed into a
   fresh venv, and `vaseweld auto examples/vase.3mf --at 6.0` run through the console entry point
   produced the same 21294-line file, which `vaseweld check` passes.
@@ -272,6 +272,19 @@ Everything below was executed on this machine against a real PrusaSlicer 2.9.6, 
     error when a pass has already failed. `ignore_cleanup_errors=True` has been there since 3.10,
     which is this project's floor. The test holds a file open across the exit and fails without it
     on this machine, so it is a real test here rather than a POSIX no-op.
+- **An eleventh review pass found two, and the first destroys the file it was given.**
+  - `vaseweld auto project.3mf -o project.3mf` overwrote the project with G-code. Reproduced: a
+    274030-byte `.3mf` came back as a 582789-byte G-code file, and the model was gone. Nothing
+    checked, because `_reject_unwritable_output` was looking at whether the target could be written
+    rather than at what was already there. `-o` onto the project is refused now, by `samefile`
+    rather than `==`, since the same file has more than one spelling on Windows. `weld` is
+    deliberately left alone: as a slicer post-processing script it is handed the file it is meant to
+    rewrite in place, so an output that is also an input is the normal case there.
+  - With `LOCALAPPDATA` unset, `os.path.join("", "Programs")` is `"Programs"`, which is truthy and
+    relative, so the `if not root: continue` guard passed it through and the slicer search globbed
+    the working directory. Demonstrated by running from a directory holding
+    `Programs/PrusaSlicer-2.9.9/prusa-slicer-console.exe`, which the search offered up as an install.
+    The join only happens when the variable is set now.
 - **Clone check.** difflib over the line lists of every new function against all 112 functions in
   the package. The first pass put `probe_slicer` against `run_slice` at 38.2%: both built the same
   six-keyword `subprocess.run` call, and the review pass had just added `stdin=DEVNULL` to each of
@@ -306,7 +319,8 @@ Everything below was executed on this machine against a real PrusaSlicer 2.9.6, 
   out loud rather than reporting as clean: it is an artefact of the measurement, not a pair of
   functions. The tenth added one, `corrupt_member` in `conftest.py`, at 10.0% against
   `_replace_member` beside it: both open a zip and write it back, and share no lines doing it. Its
-  three new tests all score under 19%.
+  three new tests all score under 19%. The eleventh added no functions, only two tests, the higher
+  at 25.0% against the `-o` guard test beside it.
 
 ## Verified working
 
@@ -325,7 +339,7 @@ Every claim below was executed on this machine, not inferred.
 - **Three delivery paths, byte-identical output.** Wheel installed into a clean venv, standalone
   `vaseweld.py`, and a PyInstaller `vaseweld.exe` built and run on Windows. All three produced
   sha256 `5c03b42c1bf4ac10...` for the same weld.
-- **The suite passes** with `python -m pytest`, 265 tests in about 45 seconds. That includes a
+- **The suite passes** with `python -m pytest`, 267 tests in about 45 seconds. That includes a
   matrix that welds all three slicers in both directions at two cut heights and runs `check` on
   every result.
 - **Three slicers, both directions, two cut heights.** All twelve welds pass `vaseweld check`.

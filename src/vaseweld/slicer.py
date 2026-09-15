@@ -124,11 +124,13 @@ def _newest_first(paths: Iterable[Path]) -> list[Path]:
 
 
 def _windows_candidates() -> list[Path]:
+    # joined only when it is set, because os.path.join("", "Programs") globs the working directory
+    local = os.environ.get("LOCALAPPDATA", "")
     roots = [
         os.environ.get("ProgramFiles", r"C:\Program Files"),
         os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)"),
         os.environ.get("ProgramW6432", ""),
-        os.path.join(os.environ.get("LOCALAPPDATA", ""), "Programs"),
+        os.path.join(local, "Programs") if local else "",
     ]
     found: list[Path] = []
     for root in roots:

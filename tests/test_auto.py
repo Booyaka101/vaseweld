@@ -380,6 +380,17 @@ def test_a_path_with_no_name_is_refused_like_any_other_directory(fake_slicer, ca
     assert fake_slicer.calls == []
 
 
+def test_writing_over_the_project_is_refused_before_slicing(fake_slicer, tmp_path, capsys):
+    """The project is the only copy of the model, and -o would land G-code on top of it."""
+    project = tmp_path / "vase.3mf"
+    shutil.copyfile(fixture(PROJECT), project)
+    code, _, stderr = run(auto_argv(fake_slicer, project, project=project), capsys)
+    assert code == EXIT_USAGE
+    assert "is the project itself" in stderr[0]
+    assert project.read_bytes() == fixture(PROJECT).read_bytes()
+    assert fake_slicer.slices == []
+
+
 def test_an_output_that_is_a_directory_is_caught_before_slicing(fake_slicer, tmp_path, capsys):
     existing = tmp_path / "out"
     existing.mkdir()
