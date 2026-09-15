@@ -111,9 +111,11 @@ def test_an_object_parked_as_not_printable_is_not_on_the_plate(tmp_path):
     assert (plate.objects, plate.instances) == (1, 1)
 
 
-def test_a_plate_with_nothing_printable_says_so(tmp_path):
+# an empty <build> is an empty plate, and the config still lists the objects that used to be on it
+@pytest.mark.parametrize("items", [PARKED, ""], ids=["parked", "no-items"])
+def test_a_plate_with_nothing_printable_says_so(tmp_path, items):
     with pytest.raises(PreflightError) as excinfo:
-        check_plate(_with_build(tmp_path, "empty.3mf", PARKED))
+        check_plate(_with_build(tmp_path, "empty.3mf", items))
     assert "nothing on it set to print" in str(excinfo.value)
 
 

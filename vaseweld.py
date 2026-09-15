@@ -31,7 +31,7 @@ import zlib
 from collections.abc import Iterable
 from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import NamedTuple
+from typing import Callable, NamedTuple
 
 
 # ---------------------------------------------------------------
@@ -1534,10 +1534,14 @@ def _extruder(block: str) -> int:
 
 
 def _printable_items(model: str) -> list[str] | None:
-    """Object ids of the instances actually set to print, or None if there is no build section."""
-    items = [(m.group(1), m.group(0)) for m in _BUILD_ITEM.finditer(model)]
-    if not items:
+    """Object ids of the instances actually set to print, or None if there is no build section.
+
+    A build section with no items in it is an empty plate, not an unreadable one, so it has to
+    come back as [] rather than falling through to counting whatever the config still lists.
+    """
+    if "<build" not in model:
         return None
+    items = [(m.group(1), m.group(0)) for m in _BUILD_ITEM.finditer(model)]
     return [objectid for objectid, tag in items if not _UNPRINTABLE.search(tag)]
 
 
@@ -3050,15 +3054,19 @@ let it append the temporary file path:
 """
 
 
-def _cut_height(text: str) -> float:
-    """argparse type for --at. nan slips past a two-sided range check, so refuse it here."""
-    try:
-        value = float(text)
-    except ValueError:
-        value = math.nan
-    if not math.isfinite(value):
-        raise argparse.ArgumentTypeError(f"cut height must be a number of mm, got {text!r}")
-    return value
+def _finite(what: str) -> "Callable[[str], float]":
+    """An argparse type that refuses nan, which slips past any pair of one-sided comparisons."""
+
+    def parse(text: str) -> float:
+        try:
+            value = float(text)
+        except ValueError:
+            value = math.nan
+        if not math.isfinite(value):
+            raise argparse.ArgumentTypeError(f"{what}, got {text!r}")
+        return value
+
+    return parse
 
 
 def _add_weld_options(cmd: argparse.ArgumentParser) -> None:
@@ -3066,7 +3074,7 @@ def _add_weld_options(cmd: argparse.ArgumentParser) -> None:
     cmd.add_argument(
         "--at",
         required=True,
-        type=_cut_height,
+        type=_finite("cut height must be a number of mm"),
         metavar="Z",
         action="append",
         help="cut height in mm; repeat it to alternate again, so two cuts give a "
@@ -3174,7 +3182,7 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     auto_cmd.add_argument(
         "--slicer-timeout",
-        type=float,
+        type=_finite("timeout must be a number of seconds"),
         metavar="SECONDS",
         help="give up on a slicing pass after this long (default: wait)",
     )

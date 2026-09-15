@@ -354,6 +354,15 @@ def test_an_output_directory_that_is_not_there_is_caught_before_slicing(
     assert fake_slicer.slices == []
 
 
+def test_a_timeout_that_is_not_a_finite_number_never_launches_the_slicer(fake_slicer, tmp_path):
+    """subprocess.run(timeout=nan) raises ValueError, and only after PrusaSlicer is already up."""
+    argv = auto_argv(fake_slicer, tmp_path / "out.gcode", extra=["--slicer-timeout", "nan"])
+    with pytest.raises(SystemExit) as raised:
+        main(argv)
+    assert raised.value.code == EXIT_USAGE
+    assert fake_slicer.calls == []
+
+
 def test_a_path_with_no_name_is_refused_like_any_other_directory(fake_slicer, capsys):
     """`.` has no stem, and the default output name used to be built from it before preflight ran."""
     argv = ["auto", ".", "--slicer-path", str(fake_slicer.path), "--at", "3"]

@@ -121,10 +121,14 @@ def _extruder(block: str) -> int:
 
 
 def _printable_items(model: str) -> list[str] | None:
-    """Object ids of the instances actually set to print, or None if there is no build section."""
-    items = [(m.group(1), m.group(0)) for m in _BUILD_ITEM.finditer(model)]
-    if not items:
+    """Object ids of the instances actually set to print, or None if there is no build section.
+
+    A build section with no items in it is an empty plate, not an unreadable one, so it has to
+    come back as [] rather than falling through to counting whatever the config still lists.
+    """
+    if "<build" not in model:
         return None
+    items = [(m.group(1), m.group(0)) for m in _BUILD_ITEM.finditer(model)]
     return [objectid for objectid, tag in items if not _UNPRINTABLE.search(tag)]
 
 
