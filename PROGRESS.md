@@ -49,9 +49,9 @@ Everything below was executed on this machine against a real PrusaSlicer 2.9.6, 
   `PrusaSlicer not found. Pass --slicer-path, or install it from https://www.prusa3d.com/prusaslicer/`.
   Confirmed on this machine, where the only PrusaSlicer is a portable build outside every standard
   location.
-- **270 tests, 269 pass and one is skipped** unless `VASEWELD_E2E=1`. That one drives the real
+- **271 tests, 270 pass and one is skipped** unless `VASEWELD_E2E=1`. That one drives the real
   binary end to end; it passes here with `VASEWELD_SLICER` pointed at the portable build. 161 of the
-  270 predate this release and still pass unchanged.
+  271 predate this release and still pass unchanged.
 - **The published artefact was run, not just built.** `python -m build --wheel`, installed into a
   fresh venv, and `vaseweld auto examples/vase.3mf --at 6.0` run through the console entry point
   produced the same 21294-line file, which `vaseweld check` passes.
@@ -299,6 +299,16 @@ Everything below was executed on this machine against a real PrusaSlicer 2.9.6, 
     printed before it, so a refusal still tells you which directory the names it is complaining
     about live in. `samefile` will not do here, because the two slices do not exist yet, so the
     comparison is `normcase(realpath())`, which also catches the project by a different spelling.
+- **CI caught two the review loop could not, because the loop only ever ran on Windows.**
+  The first PR run went red on all four Linux jobs and all four macOS jobs and green on all four
+  Windows ones. Both failures were mine, added on this branch, and both were the test rather than
+  the code: `_binary_hint` correctly names `prusa-slicer-console.exe`, `PrusaSlicer.app` or
+  `prusa-slicer` depending on the platform, and two tests asserted the Windows string. The weaker of
+  the two also passed for the wrong reason on Linux, matching `prusa-slicer` in an `or`, and only
+  failed on macOS where the hint capitalises it. The two were near-copies of each other, so they are
+  one parametrized test now that runs all three platforms through a patched `sys.platform` and
+  asserts the hint each should get. It fails on two of the three cases when `_binary_hint` is
+  flattened to the Windows string, which is the check neither of the old pair made.
 - **Clone check.** difflib over the line lists of every new function against all 112 functions in
   the package. The first pass put `probe_slicer` against `run_slice` at 38.2%: both built the same
   six-keyword `subprocess.run` call, and the review pass had just added `stdin=DEVNULL` to each of
@@ -359,7 +369,7 @@ Every claim below was executed on this machine, not inferred.
 - **Three delivery paths, byte-identical output.** Wheel installed into a clean venv, standalone
   `vaseweld.py`, and a PyInstaller `vaseweld.exe` built and run on Windows. All three produced
   sha256 `5c03b42c1bf4ac10...` for the same weld.
-- **The suite passes** with `python -m pytest`, 270 tests in about 45 seconds. That includes a
+- **The suite passes** with `python -m pytest`, 271 tests in about 45 seconds. That includes a
   matrix that welds all three slicers in both directions at two cut heights and runs `check` on
   every result.
 - **Three slicers, both directions, two cut heights.** All twelve welds pass `vaseweld check`.
