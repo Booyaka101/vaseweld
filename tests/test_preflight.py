@@ -123,6 +123,52 @@ def test_two_printable_objects_are_still_two_objects(tmp_path):
     assert "2 objects" in str(excinfo.value)
 
 
+def test_two_objects_with_two_copies_each_are_two_objects_and_four_instances(tmp_path):
+    """A copy is its own <object> in the model, aliased to the first, but one line in the config."""
+    source, destination = fixture("two_objects.3mf"), tmp_path / "pairs.3mf"
+    shutil.copyfile(source, destination)
+
+    alias = '  <object id="%d" type="model">\n   <components>\n    <component objectid="1"/>\n'
+    alias += "   </components>\n  </object>\n"
+    model = zipfile.ZipFile(source).read(MODEL_FILE).decode()
+    model = model.replace(" </resources>", (alias % 3) + (alias % 4) + " </resources>")
+    item = '  <item objectid="%d" transform="1 0 0 0 1 0 0 0 1 %d 105 0" printable="1"/>\n'
+    model = model.replace(" </build>", (item % (3, 90)) + (item % (4, 70)) + " </build>")
+    _replace_member(destination, MODEL_FILE, model)
+
+    config = zipfile.ZipFile(source).read(MODEL_CONFIG).decode()
+    head, body = config.split(" <object", 1)
+    block = " <object" + body[: body.index("</config>")]
+    _replace_member(
+        destination,
+        MODEL_CONFIG,
+        head + block + block.replace('id="1"', 'id="3"', 1) + "</config>\n",
+    )
+
+    plate = inspect_plate(destination)
+    assert (plate.objects, plate.instances) == (2, 4)
+    assert plate.describe() == "pairs.3mf: 2 objects, 4 instances"
+    with pytest.raises(PreflightError, match="2 objects"):
+        check_plate(destination)
+
+
+def test_a_support_enforcer_is_not_a_second_material(tmp_path):
+    """It carries no extruder key and lays no plastic, so inheriting the object's is not a tool."""
+    source, destination = fixture("cylinder_6mm.3mf"), tmp_path / "enforced.3mf"
+    config = zipfile.ZipFile(source).read(MODEL_CONFIG).decode()
+    enforcer = (
+        '  <volume firstid="192" lastid="203">\n'
+        '   <metadata type="volume" key="volume_type" value="SupportEnforcer"/>\n'
+        "  </volume>\n"
+    )
+    config = config.replace(
+        "  </volume>", '   <metadata type="volume" key="extruder" value="2"/>\n  </volume>'
+    ).replace(" </object>", enforcer + " </object>")
+    shutil.copyfile(source, destination)
+    _replace_member(destination, MODEL_CONFIG, config)
+    assert check_plate(destination).extruders == frozenset({2})
+
+
 def test_a_volume_left_at_the_default_beside_a_second_extruder_is_two_materials(tmp_path):
     """extruder="0" means "whatever the object uses", so 0 and 2 are extruders 1 and 2."""
     project = multi_material_3mf(tmp_path, extruders=(0, 2))

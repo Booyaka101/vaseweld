@@ -36,14 +36,20 @@
   embedded settings turn out not to be clobbered like this, so for a project the overrides hand back
   what the file already said. Where the project was saved after accepting PrusaSlicer's "shall I
   adjust those settings" dialog the originals are gone from the file, and `auto` says so rather
-  than pretending otherwise. As a backstop it also reads `spiral_vase` back out of both sliced
-  files and refuses to weld two passes that came out in the same mode.
+  than pretending otherwise. It says it whenever the settings it is handed are the vase set, not
+  only when the flag is still on, because an ini that turns the mode off and changes nothing else
+  leaves exactly the same single-wall base. As a backstop it also reads `spiral_vase` back out of
+  both sliced files and refuses to weld two passes that came out in the same mode.
 - A plate is counted the way PrusaSlicer counts it. Objects parked as not printable are not on the
   plate, and volume extruder `0` means "inherit the object's extruder" rather than a second
   material, so neither is refused any more. A volume left at `0`, or carrying no extruder key at
-  all, next to one assigned to extruder 2 is still two materials and is still refused. Reading the
-  plate streams the model rather than holding it: a 200 MB mesh cost about 450 MB of memory to
-  find one tag at the end of the file, and now costs about 6 MB.
+  all, next to one assigned to extruder 2 is still two materials and is still refused. Support
+  enforcers, blockers, modifiers and negative volumes lay no plastic, so they no longer read as a
+  second material on an object printed with extruder 2. Copies are counted as copies: a copy is its
+  own object in the model file, aliased to the first one's mesh, so two objects with two copies each
+  are reported as two objects and four instances rather than four objects. Reading the plate streams
+  the model rather than holding it: a 200 MB mesh cost about 450 MB of memory to find one tag at the
+  end of the file, and now costs about 6 MB.
 - `--slicer-path` accepts a macOS `.app` bundle, not just the binary buried inside it, and the
   error for a directory with no slicer in it names something that exists on your platform. Where
   several versions are installed side by side, the newest is tried first by version number rather
