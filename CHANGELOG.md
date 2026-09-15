@@ -62,11 +62,14 @@
   enforcers, blockers, modifiers and negative volumes lay no plastic, so they no longer read as a
   second material on an object printed with extruder 2. Copies are counted as copies: a copy is its
   own object in the model file, aliased to the first one's mesh, so two objects with two copies each
-  are reported as two objects and four instances rather than four objects. Reading the plate streams
+  are reported as two objects and four instances rather than four objects. A plate with an empty
+  build section has nothing on it, and is refused as such rather than counted from the objects the
+  project file still lists. Reading the plate streams
   the model rather than holding it: a 200 MB mesh cost about 450 MB of memory to find one tag at the
   end of the file, and now costs about 6 MB.
-- `--at nan` is refused at the flag, along with `inf` and anything else that is not a number of
-  millimetres. The weldable-range check was a pair of one-sided comparisons and nan is false against
+- `--at nan` is refused at the flag, along with `inf`, anything else that is not a number of
+  millimetres, and the same for `--slicer-timeout`, which used to reach `subprocess.run` and raise
+  with PrusaSlicer already launched. The weldable-range check was a pair of one-sided comparisons and nan is false against
   both ends, so it used to get all the way to a crash, after both slicing passes in the case of
   `auto`. The range check itself is a containment test now as well, so nothing gets through it that
   cannot name a layer.
