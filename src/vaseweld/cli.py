@@ -59,7 +59,7 @@ let it append the temporary file path:
 """
 
 
-def _finite(what: str) -> "Callable[[str], float]":
+def _finite(what: str, *, positive: bool = False) -> "Callable[[str], float]":
     """An argparse type that refuses nan, which slips past any pair of one-sided comparisons."""
 
     def parse(text: str) -> float:
@@ -67,7 +67,7 @@ def _finite(what: str) -> "Callable[[str], float]":
             value = float(text)
         except ValueError:
             value = math.nan
-        if not math.isfinite(value):
+        if not math.isfinite(value) or (positive and value <= 0):
             raise argparse.ArgumentTypeError(f"{what}, got {text!r}")
         return value
 
@@ -187,7 +187,7 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     auto_cmd.add_argument(
         "--slicer-timeout",
-        type=_finite("timeout must be a number of seconds"),
+        type=_finite("timeout must be a positive number of seconds", positive=True),
         metavar="SECONDS",
         help="give up on a slicing pass after this long (default: wait)",
     )
@@ -404,7 +404,8 @@ class _SliceDir:
                     f"{self._keep}: cannot use for --keep-slices ({exc.strerror or exc})"
                 ) from exc
             return self._keep
-        self._temp = tempfile.TemporaryDirectory(prefix="vaseweld-")
+        # a transient file lock on Windows must not turn a finished weld into a traceback
+        self._temp = tempfile.TemporaryDirectory(prefix="vaseweld-", ignore_cleanup_errors=True)
         return Path(self._temp.name)
 
     def __exit__(self, *exc_info) -> None:

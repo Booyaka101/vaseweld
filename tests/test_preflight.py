@@ -7,7 +7,7 @@ import zipfile
 
 import pytest
 
-from conftest import _replace_member, example, fixture, multi_material_3mf
+from conftest import _replace_member, corrupt_member, example, fixture, multi_material_3mf
 from vaseweld.preflight import (
     MODEL_CONFIG,
     MODEL_FILE,
@@ -104,6 +104,15 @@ def test_the_default_extruder_is_not_a_second_material(tmp_path):
     shutil.copyfile(source, destination)
     _replace_member(destination, MODEL_CONFIG, config)
     assert check_plate(destination).extruders == frozenset({1})
+
+
+def test_a_3mf_whose_model_will_not_decompress_says_so(tmp_path):
+    """zipfile raises zlib.error rather than BadZipFile when only the deflate stream is damaged."""
+    damaged = tmp_path / "damaged.3mf"
+    shutil.copyfile(fixture("cylinder_6mm.3mf"), damaged)
+    with pytest.raises(PreflightError) as excinfo:
+        check_plate(corrupt_member(damaged, MODEL_FILE))
+    assert "not a readable 3MF" in str(excinfo.value)
 
 
 def test_an_object_parked_as_not_printable_is_not_on_the_plate(tmp_path):

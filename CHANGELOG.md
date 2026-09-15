@@ -69,7 +69,11 @@
   end of the file, and now costs about 6 MB.
 - `--at nan` is refused at the flag, along with `inf`, anything else that is not a number of
   millimetres, and the same for `--slicer-timeout`, which used to reach `subprocess.run` and raise
-  with PrusaSlicer already launched. The weldable-range check was a pair of one-sided comparisons and nan is false against
+  with PrusaSlicer already launched. A timeout of zero or less is refused too, rather than starting
+  a pass in order to kill it.
+- A damaged `.3mf` gets the "not a readable 3MF" message rather than a Python traceback. Damage to
+  the deflate stream raises `zlib.error`, which is not `BadZipFile` and was not caught, and damage
+  to just the print settings got past the plate check to crash later. The weldable-range check was a pair of one-sided comparisons and nan is false against
   both ends, so it used to get all the way to a crash, after both slicing passes in the case of
   `auto`. The range check itself is a containment test now as well, so nothing gets through it that
   cannot name a layer.

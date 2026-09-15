@@ -79,6 +79,19 @@ def _replace_member(archive_path: Path, name: str, text: str) -> None:
             out.writestr(name, text.encode("utf-8"))
 
 
+def corrupt_member(archive_path: Path, name: str) -> Path:
+    """Scramble one member's deflate stream in place, so reading it raises zlib.error."""
+    with zipfile.ZipFile(archive_path) as archive:
+        item = archive.getinfo(name)
+        start = item.header_offset + 30 + len(item.filename) + len(item.extra)
+        span = range(start + 10, start + min(40, item.compress_size))
+    raw = bytearray(archive_path.read_bytes())
+    for offset in span:
+        raw[offset] ^= 0xFF
+    archive_path.write_bytes(bytes(raw))
+    return archive_path
+
+
 class FakePrusaSlicer:
     """Stands in for the binary: answers --help with a banner, writes a fixture per pass.
 
