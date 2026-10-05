@@ -196,6 +196,21 @@ def test_a_second_pass_of_a_different_length_aborts_too(fake_slicer, tmp_path, c
     assert "30 layers and the spiral vase pass 200" in stderr[0]
 
 
+@pytest.mark.parametrize("at", ["99", "0.1"])
+def test_a_cut_that_cannot_land_refuses_after_one_pass(fake_slicer, tmp_path, capsys, at):
+    """Both passes used to run first. The refusal then named an intermediate slice
+    sitting in a temporary directory that the error handling deleted on the way out,
+    so the file it blamed was already gone by the time it was read."""
+    out = tmp_path / "out.gcode"
+    code, _, stderr = run(auto_argv(fake_slicer, out, at=at), capsys)
+    assert code == EXIT_USAGE
+    assert "outside the weldable range" in stderr[0]
+    assert "Valid range is Z 0.400 to 6.000 (layers 2 to 30 of cylinder_6mm.3mf)" in stderr[0]
+    assert "spiral.gcode" not in stderr[0]
+    assert len(fake_slicer.slices) == 1  # the spiral vase pass never ran
+    assert not out.exists()
+
+
 def test_the_output_defaults_to_a_name_beside_the_project(fake_slicer, tmp_path, capsys):
     project = tmp_path / "cylinder_6mm.3mf"
     shutil.copyfile(fixture(PROJECT), project)
@@ -502,3 +517,82 @@ def test_a_failed_pass_still_says_where_the_slices_went(fake_slicer, tmp_path, c
     assert code == EXIT_USAGE
     assert f"keeping both slices in {kept}" in stdout
     assert "could not be read" in stderr[0]
+
+
+def test_set_flags_reach_both_passes_after_load(fake_slicer, tmp_path, capsys):
+    """Changing one number should not mean writing an ini, and both passes carry the
+    setting so the two slices stay comparable."""
+    config = tmp_path / "print.ini"
+    config.write_text("layer_height = 0.2\n", encoding="utf-8")
+    code, _, _ = run(
+        auto_argv(
+            fake_slicer,
+            tmp_path / "out.gcode",
+            extra=["--load", str(config), "--set", "layer_height=0.25", "--set", "brim_width=4"],
+        ),
+        capsys,
+    )
+    assert code == EXIT_OK
+    normal, vase = fake_slicer.slices
+    for argv in (normal, vase):
+        assert argv[:4] == [str(fake_slicer.path), "--export-gcode", "--load", str(config)]
+        assert "--layer-height=0.25" in argv
+        assert "--brim-width=4" in argv
+        # after the ini, so it wins over it, and before --output
+        assert argv.index("--load") < argv.index("--layer-height=0.25") < argv.index("--output")
+
+
+def test_set_takes_either_spelling_of_the_key(fake_slicer, tmp_path, capsys):
+    """The G-code footer says layer_height and the command line says --layer-height."""
+    code, _, _ = run(
+        auto_argv(fake_slicer, tmp_path / "out.gcode", extra=["--set", "layer-height=0.25"]),
+        capsys,
+    )
+    assert code == EXIT_OK
+    assert "--layer-height=0.25" in fake_slicer.slices[0]
+
+
+@pytest.mark.parametrize(
+    "item",
+    [
+        "spiral_vase=0",
+        "perimeters=3",
+        "top_solid_layers=5",
+        "fill_density=20%",
+        "support_material=1",
+        "support_material_enforce_layers=3",
+        "thin_walls=1",
+        "retract_layer_change=1",
+        "filament_retract_layer_change=0",
+    ],
+)
+def test_a_setting_the_passes_own_is_refused_before_slicing(
+    fake_slicer, tmp_path, capsys, item
+):
+    """The spiral pass owns the vase companion set and the normal pass owns the five it
+    hands back; a --set on either side would fight one pass or the other."""
+    out = tmp_path / "out.gcode"
+    code, _, stderr = run(auto_argv(fake_slicer, out, extra=["--set", item]), capsys)
+    assert code == EXIT_USAGE
+    assert f"--set {item}" in stderr[0]
+    assert "own between" in stderr[0]
+    assert fake_slicer.calls == []
+    assert not out.exists()
+
+
+@pytest.mark.parametrize("item", ["layer_height", "=0.25", "layer_height="])
+def test_a_setting_with_no_value_is_refused_before_slicing(fake_slicer, tmp_path, capsys, item):
+    out = tmp_path / "out.gcode"
+    code, _, stderr = run(auto_argv(fake_slicer, out, extra=["--set", item]), capsys)
+    assert code == EXIT_USAGE
+    assert "expected KEY=VALUE" in stderr[0]
+    assert fake_slicer.calls == []
+
+
+@pytest.mark.parametrize("item", ["1bad=2", "layer height=0.25"])
+def test_a_setting_that_is_not_a_setting_name_is_refused(fake_slicer, tmp_path, capsys, item):
+    out = tmp_path / "out.gcode"
+    code, _, stderr = run(auto_argv(fake_slicer, out, extra=["--set", item]), capsys)
+    assert code == EXIT_USAGE
+    assert "is not a PrusaSlicer setting name" in stderr[0]
+    assert fake_slicer.calls == []

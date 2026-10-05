@@ -24,12 +24,13 @@ from .slicer import (
     normal_overrides,
     probe_slicer,
     run_slice,
+    setting_flag,
     supports_are_on,
     unrecoverable_vase,
     version_complaint,
 )
 from .validate import check as run_check
-from .weld import WeldError, weld
+from .weld import WeldError, range_error, weld
 
 EXIT_OK = 0
 EXIT_PROBLEMS = 1
@@ -175,6 +176,15 @@ def _build_parser() -> argparse.ArgumentParser:
         "Required for a bare model file unless PrusaSlicer's built-in defaults will do",
     )
     auto_cmd.add_argument(
+        "--set",
+        dest="settings",
+        action="append",
+        metavar="KEY=VALUE",
+        help="pass one PrusaSlicer setting to both passes, so changing a number needs "
+        "no ini; repeat it to set several. Refused for the settings the two passes "
+        "own between them, such as spiral_vase and perimeters",
+    )
+    auto_cmd.add_argument(
         "--slicer-path",
         type=Path,
         metavar="PATH",
@@ -246,16 +256,24 @@ def _reject_bgcode_output(output: Path) -> None:
     )
 
 
+def _same_file(left: Path, right: Path) -> bool:
+    """True when both spellings name one file.
+
+    Not Path.samefile, which needs both to exist: an output may not have been
+    written yet, and Windows gives one file more than one spelling.
+    """
+    spelling = os.path.normcase(os.path.realpath(left))
+    return spelling == os.path.normcase(os.path.realpath(right))
+
+
 def _reject_unwritable_output(output: Path, taken: tuple[tuple[Path, str], ...]) -> None:
     """auto spends two slicing runs before it writes anything, so look at the target first."""
     if output.is_dir():
         raise GcodeError(f"{output} is a directory. Give -o a file name.")
     if not output.parent.is_dir():
         raise GcodeError(f"{output}: cannot write (no such directory {output.parent})")
-    # not samefile, which needs both to exist, and the two slices have not been written yet
-    spelling = os.path.normcase(os.path.realpath(output))
     for path, what in taken:
-        if spelling == os.path.normcase(os.path.realpath(path)):
+        if _same_file(output, path):
             raise GcodeError(f"{output} is {what}. Give -o a different name.")
 
 
@@ -431,6 +449,9 @@ def _run_auto(args: argparse.Namespace, out: "object") -> int:
     for config in load:
         if not config.is_file():
             raise SlicerError(f"{config}: no such config file. Check --load.")
+    # parsed here, before anything runs, so a bad key or an owned setting costs
+    # nothing: both passes would carry it, and a refusal after pass 1 is waste
+    settings = tuple(setting_flag(item) for item in (args.settings or ()))
 
     found = probe_slicer(find_slicer(args.slicer_path))
     complaint = version_complaint(found)
@@ -464,6 +485,7 @@ def _run_auto(args: argparse.Namespace, out: "object") -> int:
                 (vase_path, "where the spiral vase pass goes"),
             ),
         )
+        normal: GcodeFile | None = None
         for step, (destination, overrides, label) in enumerate(
             (
                 (normal_path, normal_overrides(config), "normal"),
@@ -479,11 +501,22 @@ def _run_auto(args: argparse.Namespace, out: "object") -> int:
                 destination,
                 overrides=overrides,
                 load=load,
+                settings=settings,
                 timeout=args.slicer_timeout,
                 echo=echo,
             )
-
-        normal, vase = parse_file(normal_path), parse_file(vase_path)
+            if step == 1:
+                # The second pass is minutes away and its ladder has to agree with
+                # this one anyway, so a cut that cannot land should say so now. The
+                # message names the project: the slice it was measured on sits in a
+                # directory that is deleted on the way out of this block.
+                normal = parse_file(destination)
+                for requested in args.at:
+                    error = range_error(normal, requested, project.name)
+                    if error is not None:
+                        raise WeldError(error)
+        assert normal is not None
+        vase = parse_file(vase_path)
         look = (
             f" Both passes are in {workdir}."
             if args.keep_slices is not None
@@ -499,6 +532,8 @@ def _run_auto(args: argparse.Namespace, out: "object") -> int:
 
 def _run_preview(args: argparse.Namespace, out: "object") -> int:
     destination = args.output or args.file.with_suffix(".html")
+    if _same_file(destination, args.file):
+        raise GcodeError(f"{destination} is the G-code file itself. Give -o a different name.")
     try:
         written = write_preview(destination, args.file)
     except OSError as exc:

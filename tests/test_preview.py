@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+import shutil
 
 import pytest
 
@@ -35,6 +36,29 @@ def test_the_banner_recovers_the_weld_layout(welded_file):
         ("normal", 1, 61),
         ("vase", 62, 149),
         ("normal", 150, 200),
+    ]
+    assert cuts == [62, 150]
+
+
+def test_the_banner_survives_spaces_in_the_source_names(tmp_path, ps_normal, ps_vase):
+    """Source names are file names, and half of them have spaces in them. The banner
+    regex used to match the name as a run of non-space characters, stopped at the
+    first space, matched nothing, and the whole layout read back as empty: the page
+    lost its colouring and its weld marker without a word about why."""
+    normal = tmp_path / "my base.gcode"
+    vase = tmp_path / "my body.gcode"
+    shutil.copyfile(ps_normal.path, normal)
+    shutil.copyfile(ps_vase.path, vase)
+    result = weld(parse_file(normal), parse_file(vase), [12.4, 30.0])
+    path = tmp_path / "welded.gcode"
+    path.write_text(
+        result.newline.join(result.lines) + result.newline, encoding="utf-8", newline=""
+    )
+    sections, cuts = read_banner(parse_file(path))
+    assert [(s.role, s.first, s.last, s.source) for s in sections] == [
+        ("normal", 1, 61, "my base.gcode"),
+        ("vase", 62, 149, "my body.gcode"),
+        ("normal", 150, 200, "my base.gcode"),
     ]
     assert cuts == [62, 150]
 

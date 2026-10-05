@@ -2,6 +2,38 @@
 
 ## 1.4.0
 
+- **`--set KEY=VALUE`, repeatable, on `auto`.** Changing one number no longer means
+  writing an ini: the setting goes to both passes, after any `--load` file so it wins
+  over it, and the key is taken in either spelling, the config's (`layer_height`) or the
+  command line's (`layer-height`). Measured on 2.9.6 over `examples/vase.3mf`, which
+  carries no settings and slices at the built-in 0.3 mm default: `--set
+  layer_height=0.25` put `--layer-height=0.25` on both command lines and produced 160
+  layers at 0.250 mm, welding at layer 23 with `check` passing. The nine settings the two
+  passes have to own between them — `spiral_vase` and the six companions the spiral pass
+  carries, plus the two layer-change retraction keys the normal pass hands back — are
+  refused at the flag before anything runs, because a `--set` there would fight one pass
+  or the other: `--set perimeters=3` would put the single wall back into the base the
+  weld exists to avoid. A `--set` naming one of PrusaSlicer's own action flags is inert
+  rather than dangerous, measured on 2.9.6: the pass's `--output` comes after the user's
+  settings and wins, so `--set output=...` changes nothing.
+- **A thirteenth review pass found three bugs the suite was green through, each with a
+  test that fails without its fix.**
+  - `auto --at 99` ran both slicing passes and then refused with "outside the weldable
+    range ... of vase-spiral.gcode": an intermediate slice in a temporary directory the
+    error handling deleted on the way out, so the file the message blamed was already
+    gone when it was read. The cut is now validated against the first pass's ladder the
+    moment that pass parses, before the second runs, and the message names the project.
+    One slicing run rather than two, and a file that exists. Verified end to end on the
+    real 2.9.6.
+  - `preview x.gcode -o x.gcode` replaced the G-code with the HTML page: exit 0, no
+    warning, the toolpath gone. Measured: an 80190-byte slice came back as 34811 bytes
+    of `<!doctype html>`. The output-is-an-input guard `weld` and `auto` already had now
+    covers `preview` too.
+  - A source file with a space in its name broke the preview's banner read. The name was
+    matched as a run of non-space characters, which stopped at the first space, matched
+    nothing, and the whole weld layout then read back as empty: the page silently lost
+    its colour-by-source and its weld marker. Names are matched up to the trailing
+    " (role)" now, so `my base.gcode (normal)` reads back whole.
 - **`vaseweld auto` slices the project for you.** Point it at a `.3mf` or any model PrusaSlicer
   opens and it runs both passes itself, normal and spiral vase, then welds them:
   `vaseweld auto vase.3mf --at 6.0 -o hybrid.gcode`. The manual route is unchanged and still works

@@ -299,6 +299,50 @@ Everything below was executed on this machine against a real PrusaSlicer 2.9.6, 
     printed before it, so a refusal still tells you which directory the names it is complaining
     about live in. `samefile` will not do here, because the two slices do not exist yet, so the
     comparison is `normcase(realpath())`, which also catches the project by a different spelling.
+- **A thirteenth review pass found three, and shipped the backlog's `--set`.** Same rule:
+  each fix has a test proved to fail without it, by stashing the source changes and
+  watching only its own tests go red.
+  - `auto --at 99` ran both passes and then refused naming `vase-spiral.gcode`, an
+    intermediate slice in a temporary directory the error handling deleted on the way
+    out of the very `with` that raised it. The file the message blamed never existed by
+    the time anyone read the message. The first pass's ladder can answer the question
+    alone, because the two ladders have to agree before anything welds anyway: the cut
+    is validated the moment pass 1 parses, the spiral pass never runs, and the message
+    names the project. The refusal itself moved into `range_error`, which `_snap` and
+    the pre-check share, so `weld`'s wording cannot drift from `auto`'s. Verified end to
+    end against the real 2.9.6: `auto examples/vase.3mf --at 99` prints `pass 1/2
+    normal` and nothing else, then refuses with "Valid range is Z 0.650 to 39.950
+    (layers 2 to 133 of vase.3mf)". The 97-file `tools/baseline.py` matrix is unchanged
+    byte for byte, because for `weld` the message is the message it always was.
+  - `preview x.gcode -o x.gcode` overwrote the G-code with the HTML page, exit 0, no
+    warning. Reproduced: an 80190-byte slice came back 34811 bytes of `<!doctype html>`.
+    The containment test the eleventh and twelfth passes built for `weld` and `auto` is
+    now `_same_file`, and `preview` refuses an output that is the input with it.
+  - A source name with a space in it, `my base.gcode`, read back from the provenance
+    banner as nothing at all. `_BANNER_SLAB` matched the name as `(\S+)`, which stopped
+    at the first space and matched nothing, and `read_banner`'s own consistency check
+    then threw away the layout it had half-read. The preview lost its colouring and its
+    weld marker without a word about why. The name matches up to the trailing "
+    (role)" and the pattern anchors at the end of the line now, so `my base.gcode
+    (normal)` reads back whole and a name with parentheses in it lands on the last
+    parenthesised word rather than the first.
+- **`--set KEY=VALUE`, repeatable, on `auto`, measured against the real 2.9.6.** The
+  backlog called this a small change, and it was once the refusal set was right.
+  `--set layer_height=0.25` over `examples/vase.3mf` — which, having been exported from
+  the command line, carries no settings and slices at the built-in 0.3 mm default — put
+  `--layer-height=0.25` on both command lines, after any `--load` ini so it wins over
+  it, and produced 160 layers at 0.250 mm from Z 0.350 to 40.100, welding at layer 23
+  with `check` passing. Either spelling of the key is taken, `layer_height` or
+  `layer-height`, because the G-code footer says one and the command line says the
+  other. Nine keys are refused at the flag, before anything runs: `spiral_vase` and the
+  six companions the spiral pass carries, plus the two layer-change retraction keys the
+  normal pass hands back — `VASE_CLOBBERED`'s five plus the four only the spiral pass
+  uses, so the two tables remain the single source of truth and a key added to either
+  is one literal away from being refused rather than one memory away. A `--set` naming
+  one of PrusaSlicer's action flags was measured rather than assumed: `--set output=`
+  beside `--keep-slices` changed nothing, because the pass's own `--output` comes after
+  the user's settings and PrusaSlicer takes the last one, its own progress lines
+  naming the kept slice.
 - **CI caught two the review loop could not, because the loop only ever ran on Windows.**
   The first PR run went red on all four Linux jobs and all four macOS jobs and green on all four
   Windows ones. Both failures were mine, added on this branch, and both were the test rather than
@@ -369,7 +413,7 @@ Every claim below was executed on this machine, not inferred.
 - **Three delivery paths, byte-identical output.** Wheel installed into a clean venv, standalone
   `vaseweld.py`, and a PyInstaller `vaseweld.exe` built and run on Windows. All three produced
   sha256 `5c03b42c1bf4ac10...` for the same weld.
-- **The suite passes** with `python -m pytest`, 271 tests in about 45 seconds. That includes a
+- **The suite passes** with `python -m pytest`, 290 tests in about 45 seconds. That includes a
   matrix that welds all three slicers in both directions at two cut heights and runs `check` on
   every result.
 - **Three slicers, both directions, two cut heights.** All twelve welds pass `vaseweld check`.
@@ -494,11 +538,7 @@ as [#issuecomment-5551899954](https://github.com/prusa3d/PrusaSlicer/issues/3204
   so it could suggest one: the lowest Z where the cross-section stops changing much, which is where
   a vase body can start without the spiral having to chase a shape. Print it as a hint first and
   only then consider `--at auto`, because a wrong automatic cut is worse than no automatic cut.
-- **`--set KEY=VALUE`, repeatable, appended to both passes.** Today the only way to steer a slice is
-  `--load INI`, which means writing a file to change one number. PrusaSlicer takes every config key
-  as a flag, so this is a small change. It was left out of 1.4.0 rather than shipped untested next
-  to a release: it needs a refusal for keys in `SPIRAL_VASE_OVERRIDES`, which the vase pass has to
-  own.
+  (`--set KEY=VALUE` was on this list and is done, above.)
 - **Drive OrcaSlicer and BambuStudio.** Both weld fine today, they just have to be sliced by hand.
   Their CLIs take `--slice` plus a settings JSON rather than per-key flags, so the spiral companion
   set becomes a JSON patch instead of seven arguments. Needs its own version gate and its own

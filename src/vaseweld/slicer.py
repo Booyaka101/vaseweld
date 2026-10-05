@@ -68,6 +68,19 @@ VASE_CLOBBERED = (
     ("filament_retract_layer_change", "nil"),
 )
 
+# The settings the two passes set themselves, derived from those two tables so this
+# cannot drift: the spiral pass owns the vase companion set and the normal pass owns
+# the clobbered five plus switching the mode off. A --set on any of them would fight
+# one pass or the other, so it is refused rather than silently overridden.
+OWNED_SETTINGS = frozenset(key for key, _ in VASE_CLOBBERED) | {
+    "spiral_vase",
+    "support_material",
+    "support_material_enforce_layers",
+    "thin_walls",
+}
+
+_SETTING_KEY = re.compile(r"[a-z][a-z0-9_]*")
+
 VERIFIED_SERIES = (2, 9)
 REFACTORED_SERIES = (3, 0)
 
@@ -384,6 +397,29 @@ def unrecoverable_vase(config: dict[str, str]) -> str | None:
     )
 
 
+def setting_flag(item: str) -> str:
+    """Turn ``layer_height=0.25`` into ``--layer-height=0.25``, refusing what auto owns.
+
+    The key is taken in either spelling, underscore or dash, because the config
+    block and the G-code footer say ``layer_height`` while the command line says
+    ``--layer-height`` and a user meeting the flag halfway should not be refused.
+    """
+    key, sep, value = item.partition("=")
+    key = key.strip().replace("-", "_").lower()
+    value = value.strip()
+    if not sep or not key or not value:
+        raise SlicerError(f"--set {item}: expected KEY=VALUE, like --set layer_height=0.25")
+    if not _SETTING_KEY.fullmatch(key):
+        raise SlicerError(f"--set {item}: {key!r} is not a PrusaSlicer setting name")
+    if key in OWNED_SETTINGS:
+        raise SlicerError(
+            f"--set {item}: {key} is one of the settings the two passes have to own between "
+            "them, because spiral vase mode and its companions are applied per pass. Set it "
+            "in the profile, or in a --load ini, rather than with --set."
+        )
+    return f"--{key.replace('_', '-')}={value}"
+
+
 def slicer_argv(
     found: Slicer,
     source: Path,
@@ -391,12 +427,14 @@ def slicer_argv(
     *,
     overrides: tuple[str, ...] = (),
     load: tuple[Path, ...] = (),
+    settings: tuple[str, ...] = (),
 ) -> list[str]:
     """The exact command line one pass runs. Asserted verbatim by the tests."""
     argv = [str(found.path), "--export-gcode"]
     for config in load:
         argv += ["--load", str(config)]
     argv += list(overrides)
+    argv += list(settings)
     argv += ["--output", str(destination), str(source)]
     return argv
 
@@ -415,11 +453,13 @@ def run_slice(
     *,
     overrides: tuple[str, ...] = (),
     load: tuple[Path, ...] = (),
+    settings: tuple[str, ...] = (),
     timeout: float | None = None,
     echo: "object" = None,
 ) -> Path:
     """Run one pass. Raises SlicerError unless `destination` exists afterwards."""
-    argv = slicer_argv(found, source, destination, overrides=overrides, load=load)
+    argv = slicer_argv(found, source, destination, overrides=overrides, load=load,
+                       settings=settings)
     if echo is not None:
         print(f"  $ {quoted(argv)}", file=echo)
     # the file existing afterwards is the only proof a pass worked, so a leftover

@@ -329,14 +329,28 @@ def _seam_lines(
     return _Seam([], lines)
 
 
-def _snap(top: GcodeFile, cut_z: float) -> Layer:
+def range_error(top: GcodeFile, cut_z: float, name: str | None = None) -> str | None:
+    """The refusal for a cut no layer of ``top`` can satisfy, or None if one can.
+
+    ``weld`` snaps through it, and ``auto`` checks the first pass's ladder with it
+    so a cut that cannot land costs one slicing run rather than two. ``name`` is
+    what the message calls the ladder's owner, which for ``auto`` is the project
+    rather than an intermediate slice that may already be gone.
+    """
     lowest, highest = top.layers[1].z, top.layers[-1].z
-    if not lowest - 1e-9 <= cut_z <= highest + 1e-9:
-        raise WeldError(
-            f"cut Z={cut_z:.3f} is outside the weldable range. "
-            f"Valid range is Z {lowest:.3f} to {highest:.3f} "
-            f"(layers 2 to {len(top.layers)} of {top.path.name})."
-        )
+    if lowest - 1e-9 <= cut_z <= highest + 1e-9:
+        return None
+    return (
+        f"cut Z={cut_z:.3f} is outside the weldable range. "
+        f"Valid range is Z {lowest:.3f} to {highest:.3f} "
+        f"(layers 2 to {len(top.layers)} of {name or top.path.name})."
+    )
+
+
+def _snap(top: GcodeFile, cut_z: float) -> Layer:
+    error = range_error(top, cut_z)
+    if error is not None:
+        raise WeldError(error)
     return [layer for layer in top.layers if layer.z <= cut_z + 1e-9][-1]
 
 

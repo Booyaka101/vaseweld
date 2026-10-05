@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -237,6 +238,18 @@ def test_preview_writes_a_page_next_to_the_gcode(tmp_path, capsys):
     assert page.exists()
     assert stdout[0].startswith(f"wrote {page} (")
     assert "open it in any browser" in stdout[0]
+
+
+def test_preview_will_not_overwrite_the_gcode_file_it_drew(tmp_path, capsys):
+    """The page is HTML and the G-code is the only copy of itself. -o naming the input
+    used to replace one with the other: exit 0, no warning, the toolpath gone."""
+    gcode = tmp_path / "in.gcode"
+    shutil.copyfile(fixture("prusaslicer_vase_6mm.gcode"), gcode)
+    before = gcode.read_bytes()
+    code, _, stderr = run(["preview", str(gcode), "-o", str(gcode)], capsys)
+    assert code == EXIT_USAGE
+    assert "is the G-code file itself" in stderr[0]
+    assert gcode.read_bytes() == before
 
 
 def test_preview_reads_binary_gcode(tmp_path, capsys):

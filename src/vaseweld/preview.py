@@ -16,7 +16,11 @@ from pathlib import Path
 from .parser import Cursor, GcodeFile, bead_width, config_float, parse_file, walk
 
 _BANNER_CUTS = re.compile(r"layer (\d+)\)")
-_BANNER_SLAB = re.compile(r";\s+layers (\d+)-(\d+) from (\S+) \((\w+)\)")
+# The source names are file names, which can carry spaces, so the name is matched
+# up to the trailing " (role)" rather than as a run of non-space characters: with
+# "my base.gcode (normal)" that run stops at "my" and the whole banner read back
+# as empty, which silently dropped the preview's colouring and the weld marker.
+_BANNER_SLAB = re.compile(r";\s+layers (\d+)-(\d+) from (.*?) \((\w+)\)$")
 
 # Colour by source, matching the images in the README.
 NORMAL = "#4682be"

@@ -1039,6 +1039,19 @@ VASE_CLOBBERED = (
     ("filament_retract_layer_change", "nil"),
 )
 
+# The settings the two passes set themselves, derived from those two tables so this
+# cannot drift: the spiral pass owns the vase companion set and the normal pass owns
+# the clobbered five plus switching the mode off. A --set on any of them would fight
+# one pass or the other, so it is refused rather than silently overridden.
+OWNED_SETTINGS = frozenset(key for key, _ in VASE_CLOBBERED) | {
+    "spiral_vase",
+    "support_material",
+    "support_material_enforce_layers",
+    "thin_walls",
+}
+
+_SETTING_KEY = re.compile(r"[a-z][a-z0-9_]*")
+
 VERIFIED_SERIES = (2, 9)
 REFACTORED_SERIES = (3, 0)
 
@@ -1355,6 +1368,29 @@ def unrecoverable_vase(config: dict[str, str]) -> str | None:
     )
 
 
+def setting_flag(item: str) -> str:
+    """Turn ``layer_height=0.25`` into ``--layer-height=0.25``, refusing what auto owns.
+
+    The key is taken in either spelling, underscore or dash, because the config
+    block and the G-code footer say ``layer_height`` while the command line says
+    ``--layer-height`` and a user meeting the flag halfway should not be refused.
+    """
+    key, sep, value = item.partition("=")
+    key = key.strip().replace("-", "_").lower()
+    value = value.strip()
+    if not sep or not key or not value:
+        raise SlicerError(f"--set {item}: expected KEY=VALUE, like --set layer_height=0.25")
+    if not _SETTING_KEY.fullmatch(key):
+        raise SlicerError(f"--set {item}: {key!r} is not a PrusaSlicer setting name")
+    if key in OWNED_SETTINGS:
+        raise SlicerError(
+            f"--set {item}: {key} is one of the settings the two passes have to own between "
+            "them, because spiral vase mode and its companions are applied per pass. Set it "
+            "in the profile, or in a --load ini, rather than with --set."
+        )
+    return f"--{key.replace('_', '-')}={value}"
+
+
 def slicer_argv(
     found: Slicer,
     source: Path,
@@ -1362,12 +1398,14 @@ def slicer_argv(
     *,
     overrides: tuple[str, ...] = (),
     load: tuple[Path, ...] = (),
+    settings: tuple[str, ...] = (),
 ) -> list[str]:
     """The exact command line one pass runs. Asserted verbatim by the tests."""
     argv = [str(found.path), "--export-gcode"]
     for config in load:
         argv += ["--load", str(config)]
     argv += list(overrides)
+    argv += list(settings)
     argv += ["--output", str(destination), str(source)]
     return argv
 
@@ -1386,11 +1424,13 @@ def run_slice(
     *,
     overrides: tuple[str, ...] = (),
     load: tuple[Path, ...] = (),
+    settings: tuple[str, ...] = (),
     timeout: float | None = None,
     echo: "object" = None,
 ) -> Path:
     """Run one pass. Raises SlicerError unless `destination` exists afterwards."""
-    argv = slicer_argv(found, source, destination, overrides=overrides, load=load)
+    argv = slicer_argv(found, source, destination, overrides=overrides, load=load,
+                       settings=settings)
     if echo is not None:
         print(f"  $ {quoted(argv)}", file=echo)
     # the file existing afterwards is the only proof a pass worked, so a leftover
@@ -1929,14 +1969,28 @@ def _seam_lines(
     return _Seam([], lines)
 
 
-def _snap(top: GcodeFile, cut_z: float) -> Layer:
+def range_error(top: GcodeFile, cut_z: float, name: str | None = None) -> str | None:
+    """The refusal for a cut no layer of ``top`` can satisfy, or None if one can.
+
+    ``weld`` snaps through it, and ``auto`` checks the first pass's ladder with it
+    so a cut that cannot land costs one slicing run rather than two. ``name`` is
+    what the message calls the ladder's owner, which for ``auto`` is the project
+    rather than an intermediate slice that may already be gone.
+    """
     lowest, highest = top.layers[1].z, top.layers[-1].z
-    if not lowest - 1e-9 <= cut_z <= highest + 1e-9:
-        raise WeldError(
-            f"cut Z={cut_z:.3f} is outside the weldable range. "
-            f"Valid range is Z {lowest:.3f} to {highest:.3f} "
-            f"(layers 2 to {len(top.layers)} of {top.path.name})."
-        )
+    if lowest - 1e-9 <= cut_z <= highest + 1e-9:
+        return None
+    return (
+        f"cut Z={cut_z:.3f} is outside the weldable range. "
+        f"Valid range is Z {lowest:.3f} to {highest:.3f} "
+        f"(layers 2 to {len(top.layers)} of {name or top.path.name})."
+    )
+
+
+def _snap(top: GcodeFile, cut_z: float) -> Layer:
+    error = range_error(top, cut_z)
+    if error is not None:
+        raise WeldError(error)
     return [layer for layer in top.layers if layer.z <= cut_z + 1e-9][-1]
 
 
@@ -2688,7 +2742,11 @@ def check(path: str | Path) -> Report:
 # ---------------------------------------------------------------
 
 _BANNER_CUTS = re.compile(r"layer (\d+)\)")
-_BANNER_SLAB = re.compile(r";\s+layers (\d+)-(\d+) from (\S+) \((\w+)\)")
+# The source names are file names, which can carry spaces, so the name is matched
+# up to the trailing " (role)" rather than as a run of non-space characters: with
+# "my base.gcode (normal)" that run stops at "my" and the whole banner read back
+# as empty, which silently dropped the preview's colouring and the weld marker.
+_BANNER_SLAB = re.compile(r";\s+layers (\d+)-(\d+) from (.*?) \((\w+)\)$")
 
 # Colour by source, matching the images in the README.
 NORMAL = "#4682be"
@@ -3187,6 +3245,15 @@ def _build_parser() -> argparse.ArgumentParser:
         "Required for a bare model file unless PrusaSlicer's built-in defaults will do",
     )
     auto_cmd.add_argument(
+        "--set",
+        dest="settings",
+        action="append",
+        metavar="KEY=VALUE",
+        help="pass one PrusaSlicer setting to both passes, so changing a number needs "
+        "no ini; repeat it to set several. Refused for the settings the two passes "
+        "own between them, such as spiral_vase and perimeters",
+    )
+    auto_cmd.add_argument(
         "--slicer-path",
         type=Path,
         metavar="PATH",
@@ -3258,16 +3325,24 @@ def _reject_bgcode_output(output: Path) -> None:
     )
 
 
+def _same_file(left: Path, right: Path) -> bool:
+    """True when both spellings name one file.
+
+    Not Path.samefile, which needs both to exist: an output may not have been
+    written yet, and Windows gives one file more than one spelling.
+    """
+    spelling = os.path.normcase(os.path.realpath(left))
+    return spelling == os.path.normcase(os.path.realpath(right))
+
+
 def _reject_unwritable_output(output: Path, taken: tuple[tuple[Path, str], ...]) -> None:
     """auto spends two slicing runs before it writes anything, so look at the target first."""
     if output.is_dir():
         raise GcodeError(f"{output} is a directory. Give -o a file name.")
     if not output.parent.is_dir():
         raise GcodeError(f"{output}: cannot write (no such directory {output.parent})")
-    # not samefile, which needs both to exist, and the two slices have not been written yet
-    spelling = os.path.normcase(os.path.realpath(output))
     for path, what in taken:
-        if spelling == os.path.normcase(os.path.realpath(path)):
+        if _same_file(output, path):
             raise GcodeError(f"{output} is {what}. Give -o a different name.")
 
 
@@ -3443,6 +3518,9 @@ def _run_auto(args: argparse.Namespace, out: "object") -> int:
     for config in load:
         if not config.is_file():
             raise SlicerError(f"{config}: no such config file. Check --load.")
+    # parsed here, before anything runs, so a bad key or an owned setting costs
+    # nothing: both passes would carry it, and a refusal after pass 1 is waste
+    settings = tuple(setting_flag(item) for item in (args.settings or ()))
 
     found = probe_slicer(find_slicer(args.slicer_path))
     complaint = version_complaint(found)
@@ -3476,6 +3554,7 @@ def _run_auto(args: argparse.Namespace, out: "object") -> int:
                 (vase_path, "where the spiral vase pass goes"),
             ),
         )
+        normal: GcodeFile | None = None
         for step, (destination, overrides, label) in enumerate(
             (
                 (normal_path, normal_overrides(config), "normal"),
@@ -3491,11 +3570,22 @@ def _run_auto(args: argparse.Namespace, out: "object") -> int:
                 destination,
                 overrides=overrides,
                 load=load,
+                settings=settings,
                 timeout=args.slicer_timeout,
                 echo=echo,
             )
-
-        normal, vase = parse_file(normal_path), parse_file(vase_path)
+            if step == 1:
+                # The second pass is minutes away and its ladder has to agree with
+                # this one anyway, so a cut that cannot land should say so now. The
+                # message names the project: the slice it was measured on sits in a
+                # directory that is deleted on the way out of this block.
+                normal = parse_file(destination)
+                for requested in args.at:
+                    error = range_error(normal, requested, project.name)
+                    if error is not None:
+                        raise WeldError(error)
+        assert normal is not None
+        vase = parse_file(vase_path)
         look = (
             f" Both passes are in {workdir}."
             if args.keep_slices is not None
@@ -3511,6 +3601,8 @@ def _run_auto(args: argparse.Namespace, out: "object") -> int:
 
 def _run_preview(args: argparse.Namespace, out: "object") -> int:
     destination = args.output or args.file.with_suffix(".html")
+    if _same_file(destination, args.file):
+        raise GcodeError(f"{destination} is the G-code file itself. Give -o a different name.")
     try:
         written = write_preview(destination, args.file)
     except OSError as exc:

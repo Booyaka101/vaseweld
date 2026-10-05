@@ -93,6 +93,19 @@ point `--load` at an exported PrusaSlicer config and repeat it to layer several:
 vaseweld auto vase.stl --load print.ini --load printer.ini --at 6.0 -o hybrid.gcode
 ```
 
+To change one number without writing an ini, pass `--set KEY=VALUE`. It goes to both
+passes, after any `--load` file so it wins over it, and it takes either spelling of the
+key, the config's or the command line's:
+
+```
+vaseweld auto vase.stl --load print.ini --set layer_height=0.25 --at 6.0 -o hybrid.gcode
+```
+
+The settings the two passes have to own between them are refused: `spiral_vase` and its
+companion set, and the retraction keys the normal pass hands back. `--set perimeters=3`
+would put the single wall back into the base, which is the one thing the weld exists to
+avoid, so it costs a message rather than a bad print.
+
 The spiral pass is not just `--spiral-vase`. PrusaSlicer's GUI turns off perimeters, top layers,
 infill, supports and thin walls alongside it, from a dialog that never runs headless, so `auto`
 passes the whole set on the command line. Slicing by hand with only the checkbox gives a slightly
@@ -389,6 +402,10 @@ and `--vase`, plus:
 
 ```
 --load INI             a PrusaSlicer config to slice with; repeat to layer several
+--set KEY=VALUE        one PrusaSlicer setting, passed to both passes so changing a
+                       number needs no ini; repeat it to set several. Refused for the
+                       settings the two passes own between them, such as spiral_vase
+                       and perimeters
 --slicer-path PATH     the PrusaSlicer binary, if it is not on PATH or a standard install
 --force-slicer-version run against a version auto is not verified on
 --slicer-timeout SECS  give up on a pass after this long
@@ -424,7 +441,8 @@ cd vaseweld
 python -m pytest
 ```
 
-271 tests, about 45 seconds, no dependencies beyond pytest. One of them drives a real PrusaSlicer
+290 tests, about 45 seconds, no dependencies beyond
+pytest. One of them drives a real PrusaSlicer
 end to end and is skipped unless you set `VASEWELD_E2E=1`, so a machine without the slicer still
 runs the rest. Everything else runs against real slicer
 output committed under `tests/fixtures/`, produced by driving PrusaSlicer 2.9.6, OrcaSlicer 2.4.2
