@@ -1,10 +1,13 @@
 # PROGRESS
 
-vaseweld 1.4.0 is built and green locally, not published. 1.3.0 is the live release:
+vaseweld 1.5.0 is built and green locally. 1.4.0 is the live release:
 `pip install vaseweld`, or
-[the release](https://github.com/Booyaka101/vaseweld/releases/tag/v1.3.0) for the exe and the
+[the release](https://github.com/Booyaka101/vaseweld/releases/tag/v1.4.0) for the exe and the
 standalone script. Demo at https://booyaka101.github.io/vaseweld/. Announced on
 [PrusaSlicer #3204](https://github.com/prusa3d/PrusaSlicer/issues/3204#issuecomment-5551899954).
+
+1.5.0 is the thirteenth review pass and `--set`, both recorded at the end of the 1.4.0
+section below.
 
 A stranger can see it work without installing anything: `vaseweld preview` writes a self-contained
 HTML page of the real toolpath, `python sim/demo.py` builds three of them plus an index from a fresh
@@ -500,20 +503,19 @@ green against PrusaSlicer alone.
 
 ## Shipping steps for the owner
 
-1.4.0 is on the local branch `auto-slice`, not pushed. Nothing here has touched the network.
+1.5.0's ship, executed on 2026-10-05: the thirteenth-pass commit and the version bump
+pushed to `main`, CI green on the head commit through the check-runs API, the wheel
+built and run from a clean venv before `twine upload`, and `v1.5.0` tagged so the
+release workflow attaches the exe, wheel, sdist and standalone `vaseweld.py` itself.
+1.4.0 went out the same way on 2026-09-15, tag `v1.4.0` on `33b7884`.
 
-1. Push `auto-slice` and open the PR against `main`. The branch carries the `auto` command, the two
-   new modules, three new test files, two new 3MF fixtures, `examples/vase.3mf`, the version bump
-   and the changelog entry.
-2. Wait for CI green on the head commit, checked through that commit's check-runs API rather than
-   `gh run watch`. The end-to-end test skips on CI, which has no PrusaSlicer; that is deliberate.
-3. Merge, then `python -m build && python -m twine upload dist/*`.
-4. Tag `v1.4.0` on the merge commit and attach the exe, wheel, sdist and standalone `vaseweld.py`.
-5. Post the reply drafted in `docs/draft-3204-reply.md` on
+Still open for the owner:
+
+1. Post the reply drafted in `docs/draft-3204-reply.md` on
    [PrusaSlicer #3204](https://github.com/prusa3d/PrusaSlicer/issues/3204). It answers greenveg
    directly and asks again for someone to print one. The bot auto-closes legacy issues around
    2026-09-23, so this wants posting before then.
-6. Still open from 1.3.0: print the hybrid, photograph it, replace `docs/weld-preview.png` as the
+2. Still open from 1.3.0: print the hybrid, photograph it, replace `docs/weld-preview.png` as the
    lead image and keep the render lower down where it explains the mechanism. The r/3Dprinting and
    r/prusa3d posts come after, with a print in hand.
 

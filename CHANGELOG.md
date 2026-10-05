@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.4.0
+## 1.5.0
 
 - **`--set KEY=VALUE`, repeatable, on `auto`.** Changing one number no longer means
   writing an ini: the setting goes to both passes, after any `--load` file so it wins
@@ -34,6 +34,9 @@
     nothing, and the whole weld layout then read back as empty: the page silently lost
     its colour-by-source and its weld marker. Names are matched up to the trailing
     " (role)" now, so `my base.gcode (normal)` reads back whole.
+
+## 1.4.0
+
 - **`vaseweld auto` slices the project for you.** Point it at a `.3mf` or any model PrusaSlicer
   opens and it runs both passes itself, normal and spiral vase, then welds them:
   `vaseweld auto vase.3mf --at 6.0 -o hybrid.gcode`. The manual route is unchanged and still works
