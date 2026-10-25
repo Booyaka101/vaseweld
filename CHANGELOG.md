@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+- Refuse a failed PrusaSlicer pass even if it leaves a G-code file behind. The
+  error includes its exit code and final diagnostic; no hybrid file is produced.
+- Protect projects and `--load` configs from collisions with either generated
+  `--keep-slices` filename. Existing hard-link aliases are recognized as inputs too.
+- Write welded G-code and HTML previews to a temporary sibling before replacing
+  the destination. Failed writes or replacements preserve the previous file,
+  including when a slicer hook updates its input in place.
+- Improve `check`: track Z across separate travel and extrusion lines, decode
+  absolute/relative E deltas, and exclude retractions and stationary priming
+  from deposited-height checks. Output G-code itself is unchanged.
+
 ## 1.5.0
 
 - **`--set KEY=VALUE`, repeatable, on `auto`.** Changing one number no longer means

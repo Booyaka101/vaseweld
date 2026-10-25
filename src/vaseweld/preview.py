@@ -13,6 +13,7 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from .files import atomic_write_text
 from .parser import Cursor, GcodeFile, bead_width, config_float, parse_file, walk
 
 _BANNER_CUTS = re.compile(r"layer (\d+)\)")
@@ -172,7 +173,7 @@ def render(preview: Preview) -> str:
 
 def write(path: Path, gcode_path: Path) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(render(build(parse_file(gcode_path))), encoding="utf-8")
+    atomic_write_text(path, render(build(parse_file(gcode_path))))
     return path
 
 

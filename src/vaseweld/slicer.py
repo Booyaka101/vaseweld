@@ -457,13 +457,12 @@ def run_slice(
     timeout: float | None = None,
     echo: "object" = None,
 ) -> Path:
-    """Run one pass. Raises SlicerError unless `destination` exists afterwards."""
+    """Run one pass. Require both a successful exit and a generated file."""
     argv = slicer_argv(found, source, destination, overrides=overrides, load=load,
                        settings=settings)
     if echo is not None:
         print(f"  $ {quoted(argv)}", file=echo)
-    # the file existing afterwards is the only proof a pass worked, so a leftover
-    # from an earlier --keep-slices run into the same directory has to go first
+    # A leftover from an earlier --keep-slices run is not evidence of success.
     try:
         destination.unlink(missing_ok=True)
     except OSError as exc:
@@ -486,14 +485,15 @@ def run_slice(
 
     # 2.9.6 exits 0 after "All objects are outside of the print volume" and writes
     # nothing, so the return code alone cannot tell us whether a pass worked.
-    if not destination.is_file():
+    if done.returncode != 0 or not destination.is_file():
         raise SlicerError(_slice_failure_message(found, source, done))
     return destination
 
 
 def _slice_failure_message(found: Slicer, source: Path, done: subprocess.CompletedProcess) -> str:
     detail = _last_meaningful_line(done.stderr) or _last_meaningful_line(done.stdout)
-    head = f"PrusaSlicer produced no G-code for {source.name} (exit {done.returncode})"
+    status = "failed" if done.returncode != 0 else "produced no G-code"
+    head = f"PrusaSlicer {status} for {source.name} (exit {done.returncode})"
     if not detail:
         return f"{head}. It printed nothing; run {found.path} on the file by hand to see why."
     return f"{head}: {detail}"

@@ -44,6 +44,30 @@ __all__ = ["__version__"]
 
 
 # ---------------------------------------------------------------
+# files.py
+# ---------------------------------------------------------------
+
+def atomic_write_text(path: Path, text: str, *, newline: str | None = None) -> None:
+    # Follow an existing symlink, as write_text does. The temporary file must be
+    # beside the target so replacement never crosses filesystems.
+    target = path.resolve()
+    temporary = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w", encoding="utf-8", newline=newline, prefix=".vaseweld-",
+            dir=target.parent, delete=False,
+        ) as stream:
+            temporary = Path(stream.name)
+            stream.write(text)
+        if target.exists():
+            temporary.chmod(target.stat().st_mode)
+        os.replace(temporary, target)
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
+
+
+# ---------------------------------------------------------------
 # bgcode.py
 # ---------------------------------------------------------------
 
@@ -1428,13 +1452,12 @@ def run_slice(
     timeout: float | None = None,
     echo: "object" = None,
 ) -> Path:
-    """Run one pass. Raises SlicerError unless `destination` exists afterwards."""
+    """Run one pass. Require both a successful exit and a generated file."""
     argv = slicer_argv(found, source, destination, overrides=overrides, load=load,
                        settings=settings)
     if echo is not None:
         print(f"  $ {quoted(argv)}", file=echo)
-    # the file existing afterwards is the only proof a pass worked, so a leftover
-    # from an earlier --keep-slices run into the same directory has to go first
+    # A leftover from an earlier --keep-slices run is not evidence of success.
     try:
         destination.unlink(missing_ok=True)
     except OSError as exc:
@@ -1457,14 +1480,15 @@ def run_slice(
 
     # 2.9.6 exits 0 after "All objects are outside of the print volume" and writes
     # nothing, so the return code alone cannot tell us whether a pass worked.
-    if not destination.is_file():
+    if done.returncode != 0 or not destination.is_file():
         raise SlicerError(_slice_failure_message(found, source, done))
     return destination
 
 
 def _slice_failure_message(found: Slicer, source: Path, done: subprocess.CompletedProcess) -> str:
     detail = _last_meaningful_line(done.stderr) or _last_meaningful_line(done.stdout)
-    head = f"PrusaSlicer produced no G-code for {source.name} (exit {done.returncode})"
+    status = "failed" if done.returncode != 0 else "produced no G-code"
+    head = f"PrusaSlicer {status} for {source.name} (exit {done.returncode})"
     if not detail:
         return f"{head}. It printed nothing; run {found.path} on the file by hand to see why."
     return f"{head}: {detail}"
@@ -2564,20 +2588,30 @@ def _body(gcode: GcodeFile) -> list[str]:
 def _check_z(gcode: GcodeFile, report: Report) -> None:
     """Extruding moves may never drop below a height already printed."""
     highest = None
-    for offset, line in enumerate(_body(gcode)):
-        move = parse_move(line)
-        if move is None or move.z is None or not move.e:
-            continue  # travel and z-hop may legitimately go down
-        if highest is not None and move.z < highest - 1e-6:
+    z = None
+    cursor = gcode.cursor()
+    for step in walk(gcode.header, cursor):
+        move = parse_move(step.line)
+        if move is not None and move.z is not None:
+            z = move.z
+    for step in walk(_body(gcode), cursor):
+        move = parse_move(step.line)
+        if move is None:
+            continue
+        if move.z is not None:
+            z = move.z
+        if z is None or step.delta is None or step.delta <= 0 or step.dist == 0:
+            continue  # travel, retraction and stationary priming do not deposit a bead
+        if highest is not None and z < highest - 1e-6:
             report.problems.append(
                 Problem(
-                    gcode.header_end + offset + 1,
+                    gcode.header_end + step.index + 1,
                     "z",
-                    f"Z goes backwards while extruding ({highest:.3f} -> {move.z:.3f})",
+                    f"Z goes backwards while extruding ({highest:.3f} -> {z:.3f})",
                 )
             )
             return
-        highest = move.z if highest is None else max(highest, move.z)
+        highest = z if highest is None else max(highest, z)
 
 
 def _check_extrusion(gcode: GcodeFile, report: Report) -> None:
@@ -2898,7 +2932,7 @@ def render(preview: Preview) -> str:
 
 def write(path: Path, gcode_path: Path) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(render(build(parse_file(gcode_path))), encoding="utf-8")
+    atomic_write_text(path, render(build(parse_file(gcode_path))))
     return path
 
 
@@ -3326,11 +3360,12 @@ def _reject_bgcode_output(output: Path) -> None:
 
 
 def _same_file(left: Path, right: Path) -> bool:
-    """True when both spellings name one file.
-
-    Not Path.samefile, which needs both to exist: an output may not have been
-    written yet, and Windows gives one file more than one spelling.
-    """
+    """Recognize existing hard links as well as spellings of a not-yet-written file."""
+    try:
+        if left.samefile(right):
+            return True
+    except OSError:
+        pass
     spelling = os.path.normcase(os.path.realpath(left))
     return spelling == os.path.normcase(os.path.realpath(right))
 
@@ -3407,7 +3442,7 @@ def _weld_files(
     if not args.dry_run:
         text = result.newline.join(result.lines) + result.newline
         try:
-            output.write_text(text, encoding="utf-8", newline="")
+            atomic_write_text(output, text, newline="")
         except OSError as exc:
             raise GcodeError(f"{output}: cannot write ({exc.strerror or exc})") from exc
 
@@ -3544,6 +3579,12 @@ def _run_auto(args: argparse.Namespace, out: "object") -> int:
             print(f"keeping both slices in {workdir}", file=out)
         normal_path = workdir / f"{project.stem}-normal.gcode"
         vase_path = workdir / f"{project.stem}-spiral.gcode"
+        protected = (
+            (project, "the project itself"),
+            *((config_file, "a --load config") for config_file in load),
+        )
+        for destination in (normal_path, vase_path):
+            _reject_unwritable_output(destination, protected)
         # after the workdir exists, because -o inside --keep-slices is a reasonable thing to ask for
         _reject_unwritable_output(
             output,

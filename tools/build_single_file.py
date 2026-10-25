@@ -13,6 +13,7 @@ from pathlib import Path
 
 MODULES = (
     "__init__",
+    "files",
     "bgcode",
     "parser",
     "compat",
