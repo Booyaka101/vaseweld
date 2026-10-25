@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.6.0
 
 - Preserve the source feed rate after generated seam travel/retraction moves
   and when switching to a section with a different inherited speed.

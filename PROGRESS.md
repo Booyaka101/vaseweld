@@ -1,8 +1,8 @@
 # PROGRESS
 
-vaseweld 1.5.0 is the live release:
+vaseweld 1.6.0:
 `pip install vaseweld`, or
-[the release](https://github.com/Booyaka101/vaseweld/releases/tag/v1.5.0) for the exe and the
+[the release](https://github.com/Booyaka101/vaseweld/releases/tag/v1.6.0) for the exe and the
 standalone script. Demo at https://booyaka101.github.io/vaseweld/. Announced on
 [PrusaSlicer #3204](https://github.com/prusa3d/PrusaSlicer/issues/3204#issuecomment-5551899954).
 
