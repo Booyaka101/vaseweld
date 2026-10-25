@@ -264,6 +264,7 @@ def test_seam_retract_is_added_only_when_the_layer_lacks_one(ps_normal, ps_vase)
         "retract",
         "travel to where the next slice expects the nozzle",
         "unretract",
+        "restore feed rate",
     ]
     # The normal slice retracts and travels at every layer change, so the seam needs nothing.
     backward = weld(ps_normal, ps_vase, CUT_Z, first_role="vase")
@@ -332,11 +333,13 @@ def test_seam_matches_the_retraction_state_each_slicer_leaves(
 
     bambu = weld(bambu_normal, bambu_vase, CUT_Z)
     seam = [line.split(SEAM)[1].strip() for line in bridge_lines(bambu)]
-    assert seam == ["travel to where the next slice expects the nozzle", "unretract"]
+    assert seam == ["travel to where the next slice expects the nozzle", "unretract",
+                    "restore feed rate"]
 
     prusa = weld(ps_normal, ps_vase, CUT_Z)
     seam = [line.split(SEAM)[1].strip() for line in bridge_lines(prusa)]
-    assert seam == ["retract", "travel to where the next slice expects the nozzle", "unretract"]
+    assert seam == ["retract", "travel to where the next slice expects the nozzle", "unretract",
+                    "restore feed rate"]
 
 
 def test_bambu_vase_first_corrects_the_retraction_the_other_way(bambu_normal, bambu_vase):

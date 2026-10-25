@@ -373,6 +373,20 @@ companion test that the same measurement does catch a hand splice. See [sim/READ
 
 Exit codes are 0 for OK, 1 for problems found, 2 for a file it could not read.
 
+The Z check follows the current height even when a travel line changes Z and a
+later extrusion line omits it. Retractions, Z hops and stationary priming do not
+raise the highest deposited height.
+
+Binary G-code is checked against its stored CRC32 checksums when present, and
+invalid block sizes or encodings are refused before welding. A checksum detects
+accidental corruption, not whether G-code is trustworthy or suitable for a printer.
+
+These are sanity checks, not a printer-safety certification. Slice both inputs
+for your own printer, filament and plate, or use `auto` with your own project and
+`--load` profile. Welding does not make someone else's G-code portable to your
+printer. Inspect the hybrid in a G-code viewer before printing; an HTML preview
+does not validate firmware commands, bed clearance or physical seam strength.
+
 ```
 $ vaseweld check broken.gcode
 FAIL: 1 problem in broken.gcode

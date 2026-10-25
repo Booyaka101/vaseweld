@@ -72,20 +72,30 @@ def _body(gcode: GcodeFile) -> list[str]:
 def _check_z(gcode: GcodeFile, report: Report) -> None:
     """Extruding moves may never drop below a height already printed."""
     highest = None
-    for offset, line in enumerate(_body(gcode)):
-        move = parse_move(line)
-        if move is None or move.z is None or not move.e:
-            continue  # travel and z-hop may legitimately go down
-        if highest is not None and move.z < highest - 1e-6:
+    z = None
+    cursor = gcode.cursor()
+    for step in walk(gcode.header, cursor):
+        move = parse_move(step.line)
+        if move is not None and move.z is not None:
+            z = move.z
+    for step in walk(_body(gcode), cursor):
+        move = parse_move(step.line)
+        if move is None:
+            continue
+        if move.z is not None:
+            z = move.z
+        if z is None or step.delta is None or step.delta <= 0 or step.dist == 0:
+            continue  # travel, retraction and stationary priming do not deposit a bead
+        if highest is not None and z < highest - 1e-6:
             report.problems.append(
                 Problem(
-                    gcode.header_end + offset + 1,
+                    gcode.header_end + step.index + 1,
                     "z",
-                    f"Z goes backwards while extruding ({highest:.3f} -> {move.z:.3f})",
+                    f"Z goes backwards while extruding ({highest:.3f} -> {z:.3f})",
                 )
             )
             return
-        highest = move.z if highest is None else max(highest, move.z)
+        highest = z if highest is None else max(highest, z)
 
 
 def _check_extrusion(gcode: GcodeFile, report: Report) -> None:

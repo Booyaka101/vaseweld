@@ -9,7 +9,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
-from .parser import GcodeFile, find_objects_info, parse_move, strip_comment
+from .parser import GcodeFile, find_objects_info, parse_move, state_at, strip_comment, walk
 
 # Quoted verbatim from PrusaSlicer's own validator (Print::validate).
 SINGLE_MATERIAL_MSG = (
@@ -95,30 +95,26 @@ def tools_used(gcode: GcodeFile) -> set[int]:
 def first_layer_footprint(gcode: GcodeFile) -> Footprint | None:
     """Bounding box of the object extrusions on layer 1, skirt and brim excluded."""
     layer = gcode.layers[0]
-    x = y = None
+    cursor = state_at(gcode, layer.start)
     section = ""
     xs: list[float] = []
     ys: list[float] = []
-    for line in gcode.layer_lines(layer):
-        marker = _SKIRT_TYPE.match(line)
+    for step in walk(gcode.layer_lines(layer), cursor):
+        marker = _SKIRT_TYPE.match(step.line)
         if marker:
             section = marker.group(1).lower()
-        move = parse_move(line)
+        move = parse_move(step.line)
         if move is None:
             continue
-        if move.x is not None:
-            x = move.x
-        if move.y is not None:
-            y = move.y
-        if move.e is None or move.e <= 0:
+        if step.delta is None or step.delta <= 0:
             continue
         if move.x is None and move.y is None:
             continue
         if "skirt" in section or "brim" in section:
             continue
-        if x is not None and y is not None:
-            xs.append(x)
-            ys.append(y)
+        if cursor.x is not None and cursor.y is not None:
+            xs.append(cursor.x)
+            ys.append(cursor.y)
     if not xs:
         return None
     return Footprint(min(xs), min(ys), max(xs), max(ys))

@@ -120,3 +120,22 @@ def test_mid_print_mode_switch_is_caught(welded_lines, write):
 
 def test_check_reads_binary_gcode():
     assert check(fixture("binary_6mm.bgcode")).ok
+
+
+@pytest.mark.parametrize("relative", [False, True])
+def test_z_drop_on_travel_is_detected_at_next_printing_move(write, relative):
+    lines = ["M83" if relative else "M82", "G92 E0", "G1 X0 Y0 Z0.2",
+             ";LAYER_CHANGE", ";Z:0.2", "G1 X10 Y0 E1", ";LAYER_CHANGE", ";Z:0.4",
+             "G1 Z0.4", f"G1 X20 Y0 E{1 if relative else 2}",
+             "G1 Z0.1", f"G1 X30 Y0 E{1 if relative else 3}", "M104 S0"]
+    report = check(write(lines))
+    problems = [problem for problem in report.problems if problem.check == "z"]
+    assert len(problems) == 1
+    assert problems[0].line == 12
+
+
+def test_retraction_and_zhop_do_not_count_as_deposition(write):
+    lines = ["M83", ";LAYER_CHANGE", ";Z:0.2", "G1 X0 Y0 Z0.2", "G1 X10 Y0 E1",
+             "G1 X11 Z0.8 E-0.5", "G1 Z0.2", "G1 E0.5", "G1 X20 E1",
+             ";LAYER_CHANGE", ";Z:0.4", "G1 Z0.4", "G1 X30 E1", "M104 S0"]
+    assert check(write(lines)).ok

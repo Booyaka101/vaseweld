@@ -60,6 +60,7 @@ class Cursor:
     x: float | None = None
     y: float | None = None
     retracted: float = 0.0  # millimetres of filament currently pulled back
+    f: float | None = None
 
     def copy(self) -> "Cursor":
         return replace(self)
@@ -226,6 +227,8 @@ def walk(lines: list[str], cursor: Cursor):
             cursor.x = move.x
         if move.y is not None:
             cursor.y = move.y
+        if move.f is not None:
+            cursor.f = move.f
 
         delta = None
         if move.e is not None:

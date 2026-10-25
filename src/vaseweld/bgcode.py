@@ -224,6 +224,7 @@ def _blocks(raw: bytes):
 
     at = 10
     while at < len(raw):
+        block_start = at
         try:
             btype, compression = struct.unpack_from("<HH", raw, at)
             at += 4
@@ -242,10 +243,22 @@ def _blocks(raw: bytes):
         except struct.error as exc:
             raise BgcodeError("truncated block header") from exc
 
+        if at > len(raw):
+            raise BgcodeError("truncated block parameters")
+        if btype > _THUMBNAIL:
+            raise BgcodeError(f"unknown block type {btype}")
+
         payload = raw[at : at + stored]
         if len(payload) < stored:
             raise BgcodeError("truncated block data")
-        at += stored + (4 if checksum else 0)
+        at += stored
+        if checksum:
+            if len(raw) - at < 4:
+                raise BgcodeError("truncated block checksum")
+            (expected,) = struct.unpack_from("<I", raw, at)
+            if zlib.crc32(memoryview(raw)[block_start:at]) != expected:
+                raise BgcodeError(f"block checksum mismatch at byte {block_start}")
+            at += 4
 
         if btype == _THUMBNAIL:
             continue
@@ -259,6 +272,11 @@ def _blocks(raw: bytes):
             payload = heatshrink(payload, window, 4, size)
         elif compression:
             raise BgcodeError(f"unknown compression algorithm {compression}")
+        if len(payload) != size:
+            raise BgcodeError(f"block size mismatch: got {len(payload)}, expected {size}")
+        encodings = (0, _MEATPACK, _MEATPACK_COMMENTS) if btype == _GCODE else (0,)
+        if parameter not in encodings:
+            raise BgcodeError(f"unknown encoding {parameter} for block type {btype}")
         yield btype, parameter, payload
 
 

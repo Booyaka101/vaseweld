@@ -2,7 +2,11 @@ FROM debian:bookworm-slim
 RUN apt-get update -qq && apt-get install -y -qq --no-install-recommends \
       git build-essential python3 python3-dev python3-venv libffi-dev ca-certificates pkg-config \
     && rm -rf /var/lib/apt/lists/*
-RUN git clone --depth 1 https://github.com/Klipper3d/klipper /klipper
+ARG KLIPPER_REV=ee2c6fb6b00b2b5d097ef70d0868df7d74943b51
+RUN git init /klipper \
+    && git -C /klipper remote add origin https://github.com/Klipper3d/klipper \
+    && git -C /klipper fetch --depth 1 origin "$KLIPPER_REV" \
+    && git -C /klipper checkout --detach FETCH_HEAD
 WORKDIR /klipper
 # "Linux process" MCU target builds with native gcc, no cross compiler needed.
 RUN printf '%s\n' \

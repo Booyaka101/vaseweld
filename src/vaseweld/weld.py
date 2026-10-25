@@ -183,6 +183,7 @@ class _Sink:
         self.lines: list[str] = []
         self.net_e = 0.0
         self.saw_mode_command = False
+        self.feed_rate: float | None = None
 
     def append_generated(self, lines: list[str], cursor: Cursor | None = None) -> None:
         """Append lines vaseweld wrote itself, which are already relative E.
@@ -196,6 +197,8 @@ class _Sink:
             if move is None:
                 continue
             self.net_e += move.e or 0.0
+            if move.f is not None:
+                self.feed_rate = move.f
             if cursor is not None:
                 cursor.x = move.x if move.x is not None else cursor.x
                 cursor.y = move.y if move.y is not None else cursor.y
@@ -205,6 +208,17 @@ class _Sink:
     ) -> None:
         factors = factors or {}
         for step in walk(lines, cursor):
+            if step.kind == "move":
+                move = parse_move(step.line)
+                if move.f is not None:
+                    self.feed_rate = move.f
+                elif cursor.f is not None and self.feed_rate != cursor.f:
+                    # Seam moves and a different source section can both change
+                    # the modal F inherited by a move with no explicit feed rate.
+                    self.lines.append(
+                        f"G1 F{cursor.f:g} ; vaseweld: seam restore feed rate"
+                    )
+                    self.feed_rate = cursor.f
             if step.kind == "mode":
                 self.saw_mode_command = True
                 if parse_e_mode(step.line):
@@ -746,6 +760,7 @@ def _splice(plan: _Plan, *, seam_retract: bool) -> _Spliced:
 
     tail = plan.regions[-1].source
     footer_sink = _Sink()
+    footer_sink.feed_rate = sink.feed_rate
     footer_sink.feed(tail.lines[tail.footer_start :], cursor)
     return _Spliced(
         body=sink.lines,

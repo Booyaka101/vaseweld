@@ -12,6 +12,7 @@ from typing import Callable
 
 from . import __version__
 from .compat import CompatError, check_compatible
+from .files import atomic_write_text
 from .parser import GcodeError, GcodeFile, parse_file
 from .preflight import PreflightError, check_plate
 from .preview import write as write_preview
@@ -257,11 +258,12 @@ def _reject_bgcode_output(output: Path) -> None:
 
 
 def _same_file(left: Path, right: Path) -> bool:
-    """True when both spellings name one file.
-
-    Not Path.samefile, which needs both to exist: an output may not have been
-    written yet, and Windows gives one file more than one spelling.
-    """
+    """Recognize existing hard links as well as spellings of a not-yet-written file."""
+    try:
+        if left.samefile(right):
+            return True
+    except OSError:
+        pass
     spelling = os.path.normcase(os.path.realpath(left))
     return spelling == os.path.normcase(os.path.realpath(right))
 
@@ -338,7 +340,7 @@ def _weld_files(
     if not args.dry_run:
         text = result.newline.join(result.lines) + result.newline
         try:
-            output.write_text(text, encoding="utf-8", newline="")
+            atomic_write_text(output, text, newline="")
         except OSError as exc:
             raise GcodeError(f"{output}: cannot write ({exc.strerror or exc})") from exc
 
@@ -475,6 +477,12 @@ def _run_auto(args: argparse.Namespace, out: "object") -> int:
             print(f"keeping both slices in {workdir}", file=out)
         normal_path = workdir / f"{project.stem}-normal.gcode"
         vase_path = workdir / f"{project.stem}-spiral.gcode"
+        protected = (
+            (project, "the project itself"),
+            *((config_file, "a --load config") for config_file in load),
+        )
+        for destination in (normal_path, vase_path):
+            _reject_unwritable_output(destination, protected)
         # after the workdir exists, because -o inside --keep-slices is a reasonable thing to ask for
         _reject_unwritable_output(
             output,
