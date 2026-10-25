@@ -11,6 +11,7 @@ import json
 import math
 import re
 from dataclasses import dataclass, field
+from html import escape as escape_html
 from pathlib import Path
 
 from .files import atomic_write_text
@@ -159,15 +160,19 @@ def render(preview: Preview) -> str:
     }
     legend = "".join(
         f'<span class="key"><i style="background:{VASE if s.role == "vase" else NORMAL}"></i>'
-        f"layers {s.first}-{s.last} from {s.source} ({s.role})</span>"
+        f"layers {s.first}-{s.last} from {escape_html(s.source)} ({escape_html(s.role)})</span>"
         for s in preview.sections
     )
-    return (
-        _TEMPLATE.replace("__TITLE__", preview.name)
-        .replace("__LEGEND__", legend)
-        .replace("__DATA__", json.dumps(data, separators=(",", ":")))
-        .replace("__NORMAL__", NORMAL)
-        .replace("__VASE__", VASE)
+    values = {
+        "TITLE": escape_html(preview.name),
+        "LEGEND": legend,
+        # A JSON string is not enough to keep </script> out of an HTML script element.
+        "DATA": json.dumps(data, separators=(",", ":")).replace("<", r"\u003c"),
+        "NORMAL": NORMAL,
+        "VASE": VASE,
+    }
+    return re.sub(
+        r"__(TITLE|LEGEND|DATA|NORMAL|VASE)__", lambda match: values[match.group(1)], _TEMPLATE
     )
 
 

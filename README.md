@@ -377,6 +377,10 @@ The Z check follows the current height even when a travel line changes Z and a
 later extrusion line omits it. Retractions, Z hops and stationary priming do not
 raise the highest deposited height.
 
+Binary G-code is checked against its stored CRC32 checksums when present, and
+invalid block sizes or encodings are refused before welding. A checksum detects
+accidental corruption, not whether G-code is trustworthy or suitable for a printer.
+
 These are sanity checks, not a printer-safety certification. Slice both inputs
 for your own printer, filament and plate, or use `auto` with your own project and
 `--load` profile. Welding does not make someone else's G-code portable to your

@@ -21,6 +21,18 @@ jobs:
       - run: python -m pip install --upgrade pip pytest
       - run: python -m pytest -q
 
+  firmware:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: docker build -t vaseweld-klipper sim/
+      - run: python sim/build_cases.py
+      - run: docker run --rm -v "$PWD/sim:/work" vaseweld-klipper bash /work/run.sh
+
   package:
     runs-on: ubuntu-latest
     steps:

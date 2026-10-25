@@ -30,6 +30,7 @@ import zipfile
 import zlib
 from collections.abc import Iterable
 from dataclasses import dataclass, field, replace
+from html import escape
 from pathlib import Path
 from typing import Callable, NamedTuple
 
@@ -278,6 +279,7 @@ def _blocks(raw: bytes):
 
     at = 10
     while at < len(raw):
+        block_start = at
         try:
             btype, compression = struct.unpack_from("<HH", raw, at)
             at += 4
@@ -296,10 +298,22 @@ def _blocks(raw: bytes):
         except struct.error as exc:
             raise BgcodeError("truncated block header") from exc
 
+        if at > len(raw):
+            raise BgcodeError("truncated block parameters")
+        if btype > _THUMBNAIL:
+            raise BgcodeError(f"unknown block type {btype}")
+
         payload = raw[at : at + stored]
         if len(payload) < stored:
             raise BgcodeError("truncated block data")
-        at += stored + (4 if checksum else 0)
+        at += stored
+        if checksum:
+            if len(raw) - at < 4:
+                raise BgcodeError("truncated block checksum")
+            (expected,) = struct.unpack_from("<I", raw, at)
+            if zlib.crc32(memoryview(raw)[block_start:at]) != expected:
+                raise BgcodeError(f"block checksum mismatch at byte {block_start}")
+            at += 4
 
         if btype == _THUMBNAIL:
             continue
@@ -313,6 +327,11 @@ def _blocks(raw: bytes):
             payload = heatshrink(payload, window, 4, size)
         elif compression:
             raise BgcodeError(f"unknown compression algorithm {compression}")
+        if len(payload) != size:
+            raise BgcodeError(f"block size mismatch: got {len(payload)}, expected {size}")
+        encodings = (0, _MEATPACK, _MEATPACK_COMMENTS) if btype == _GCODE else (0,)
+        if parameter not in encodings:
+            raise BgcodeError(f"unknown encoding {parameter} for block type {btype}")
         yield btype, parameter, payload
 
 
@@ -410,6 +429,7 @@ class Cursor:
     x: float | None = None
     y: float | None = None
     retracted: float = 0.0  # millimetres of filament currently pulled back
+    f: float | None = None
 
     def copy(self) -> "Cursor":
         return replace(self)
@@ -576,6 +596,8 @@ def walk(lines: list[str], cursor: Cursor):
             cursor.x = move.x
         if move.y is not None:
             cursor.y = move.y
+        if move.f is not None:
+            cursor.f = move.f
 
         delta = None
         if move.e is not None:
@@ -913,30 +935,26 @@ def tools_used(gcode: GcodeFile) -> set[int]:
 def first_layer_footprint(gcode: GcodeFile) -> Footprint | None:
     """Bounding box of the object extrusions on layer 1, skirt and brim excluded."""
     layer = gcode.layers[0]
-    x = y = None
+    cursor = state_at(gcode, layer.start)
     section = ""
     xs: list[float] = []
     ys: list[float] = []
-    for line in gcode.layer_lines(layer):
-        marker = _SKIRT_TYPE.match(line)
+    for step in walk(gcode.layer_lines(layer), cursor):
+        marker = _SKIRT_TYPE.match(step.line)
         if marker:
             section = marker.group(1).lower()
-        move = parse_move(line)
+        move = parse_move(step.line)
         if move is None:
             continue
-        if move.x is not None:
-            x = move.x
-        if move.y is not None:
-            y = move.y
-        if move.e is None or move.e <= 0:
+        if step.delta is None or step.delta <= 0:
             continue
         if move.x is None and move.y is None:
             continue
         if "skirt" in section or "brim" in section:
             continue
-        if x is not None and y is not None:
-            xs.append(x)
-            ys.append(y)
+        if cursor.x is not None and cursor.y is not None:
+            xs.append(cursor.x)
+            ys.append(cursor.y)
     if not xs:
         return None
     return Footprint(min(xs), min(ys), max(xs), max(ys))
@@ -1847,6 +1865,7 @@ class _Sink:
         self.lines: list[str] = []
         self.net_e = 0.0
         self.saw_mode_command = False
+        self.feed_rate: float | None = None
 
     def append_generated(self, lines: list[str], cursor: Cursor | None = None) -> None:
         """Append lines vaseweld wrote itself, which are already relative E.
@@ -1860,6 +1879,8 @@ class _Sink:
             if move is None:
                 continue
             self.net_e += move.e or 0.0
+            if move.f is not None:
+                self.feed_rate = move.f
             if cursor is not None:
                 cursor.x = move.x if move.x is not None else cursor.x
                 cursor.y = move.y if move.y is not None else cursor.y
@@ -1869,6 +1890,17 @@ class _Sink:
     ) -> None:
         factors = factors or {}
         for step in walk(lines, cursor):
+            if step.kind == "move":
+                move = parse_move(step.line)
+                if move.f is not None:
+                    self.feed_rate = move.f
+                elif cursor.f is not None and self.feed_rate != cursor.f:
+                    # Seam moves and a different source section can both change
+                    # the modal F inherited by a move with no explicit feed rate.
+                    self.lines.append(
+                        f"G1 F{cursor.f:g} ; vaseweld: seam restore feed rate"
+                    )
+                    self.feed_rate = cursor.f
             if step.kind == "mode":
                 self.saw_mode_command = True
                 if parse_e_mode(step.line):
@@ -2410,6 +2442,7 @@ def _splice(plan: _Plan, *, seam_retract: bool) -> _Spliced:
 
     tail = plan.regions[-1].source
     footer_sink = _Sink()
+    footer_sink.feed_rate = sink.feed_rate
     footer_sink.feed(tail.lines[tail.footer_start :], cursor)
     return _Spliced(
         body=sink.lines,
@@ -2918,15 +2951,19 @@ def render(preview: Preview) -> str:
     }
     legend = "".join(
         f'<span class="key"><i style="background:{VASE if s.role == "vase" else NORMAL}"></i>'
-        f"layers {s.first}-{s.last} from {s.source} ({s.role})</span>"
+        f"layers {s.first}-{s.last} from {escape_html(s.source)} ({escape_html(s.role)})</span>"
         for s in preview.sections
     )
-    return (
-        _TEMPLATE.replace("__TITLE__", preview.name)
-        .replace("__LEGEND__", legend)
-        .replace("__DATA__", json.dumps(data, separators=(",", ":")))
-        .replace("__NORMAL__", NORMAL)
-        .replace("__VASE__", VASE)
+    values = {
+        "TITLE": escape_html(preview.name),
+        "LEGEND": legend,
+        # A JSON string is not enough to keep </script> out of an HTML script element.
+        "DATA": json.dumps(data, separators=(",", ":")).replace("<", r"\u003c"),
+        "NORMAL": NORMAL,
+        "VASE": VASE,
+    }
+    return re.sub(
+        r"__(TITLE|LEGEND|DATA|NORMAL|VASE)__", lambda match: values[match.group(1)], _TEMPLATE
     )
 
 

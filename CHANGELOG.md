@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- Preserve the source feed rate after generated seam travel/retraction moves
+  and when switching to a section with a different inherited speed.
+- Verify binary G-code CRC32 checksums, checksum completeness, decompressed
+  sizes and supported encodings before interpreting commands or metadata.
+- Escape filenames and provenance in HTML previews, including embedded JSON;
+  template-like text in filenames is no longer substituted a second time.
+- Exclude absolute-E retracting wipes from object placement measurements.
+- Run the Klipper motion simulation in CI. The runner now fails on an unexpected
+  weld rejection or a missing negative-control rejection instead of always exiting 0.
 - Refuse a failed PrusaSlicer pass even if it leaves a G-code file behind. The
   error includes its exit code and final diagnostic; no hybrid file is produced.
 - Protect projects and `--load` configs from collisions with either generated
@@ -11,7 +20,7 @@
   including when a slicer hook updates its input in place.
 - Improve `check`: track Z across separate travel and extrusion lines, decode
   absolute/relative E deltas, and exclude retractions and stationary priming
-  from deposited-height checks. Output G-code itself is unchanged.
+  from deposited-height checks.
 
 ## 1.5.0
 

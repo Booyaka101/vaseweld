@@ -1,12 +1,13 @@
 # Klipper simulation
 
-The unit tests prove the welded file is well formed. This proves a printer would accept it,
-by feeding it to a real printer firmware.
+The unit tests check the welded file's structure. This simulation checks whether
+the configured Klipper firmware accepts its motion, without a printer attached.
 
 `klippy` is Klipper's host process. Given `-i file.gcode` it runs in batch mode: it parses the
 G-code, plans every move through the real cartesian kinematics, and applies the real extruder
-limits, without a printer attached. Anything klippy refuses to plan is something the printer
-would refuse too.
+limits, without a printer attached. A refusal applies to this configuration, not
+every printer or firmware. Acceptance does not establish physical print safety
+or seam strength. The results below are historical, not a run of every later revision.
 
 ## Running it
 
@@ -18,6 +19,26 @@ python sim/build_cases.py
 docker run --rm -v "$PWD/sim:/work" klipper-batch bash /work/run.sh
 python sim/analyse.py
 ```
+
+CI runs the case matrix on each pull request. The runner exits nonzero if a
+generated weld fails, or if the absolute-E hand-splice negative control does not
+trigger its expected excessive-extrusion rejection.
+
+The Dockerfile pins the Klipper revision for reproducible checks. A different
+revision can be tested with `docker build --build-arg KLIPPER_REV=COMMIT ...`.
+
+### October 25, 2026 rerun
+
+At Klipper `ee2c6fb6b00b2b5d097ef70d0868df7d74943b51`, all six generated
+welds and four source files passed. The relative-E hand splice also passed motion
+planning; the absolute-E hand splice was rejected as expected. After restoring
+modal feed rates at seams, normal-first welds planned at 303.038s / 303.165s
+(absolute / relative sources), vase-first at 371.931s, and two-cut at 359.382s.
+The seam-distance and flow measurements below were reproduced unchanged.
+
+Two injected runner checks also returned nonzero as required: a rejected motion
+in a supposed good weld, and a valid source substituted for the failing negative
+control. These are simulator results, not physical prints.
 
 `build_cases.py` writes six files per extruder mode from the committed fixtures: the two slicer
 originals, the splice you get by pasting the two files together in a text editor, vaseweld's weld in
