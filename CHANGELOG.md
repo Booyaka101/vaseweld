@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.7.0
 
 - Add `check FILE --json` for machine-readable validation results, preserving
   the existing exit codes and human-readable default.
