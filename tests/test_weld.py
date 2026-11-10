@@ -114,6 +114,29 @@ def test_absolute_to_relative_round_trips_to_the_same_extrusion(ps_normal, ps_va
     assert output_extrusion(plain.lines) == pytest.approx(expected, abs=1e-6)
 
 
+def test_compact_inputs_weld_to_the_same_moves(tmp_path):
+    sources = [parse_file(fixture(f"prusaslicer_{role}_6mm.gcode"))
+               for role in ("normal", "vase")]
+    compact = []
+    for source in sources:
+        path = tmp_path / source.path.name
+        lines = []
+        for line in source.lines:
+            code, separator, comment = line.partition(";")
+            if parse_move(line) is not None or parse_g92_e(line) is not None:
+                code = code.replace(" ", "")
+            lines.append(code + separator + comment)
+        path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        compact.append(parse_file(path))
+
+    expected = weld(*sources, 3.0)
+    actual = weld(*compact, 3.0)
+    assert actual.summary() == expected.summary()
+    assert [parse_move(line) for line in actual.lines if parse_move(line) is not None] == [
+        parse_move(line) for line in expected.lines if parse_move(line) is not None
+    ]
+
+
 def decode_layer(gcode, layer):
     """(delta, xy distance) per line of a layer, or None for lines without an E word.
 

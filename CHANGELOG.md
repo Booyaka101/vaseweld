@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- Parse compact G-code without treating the extrusion word as a numeric exponent.
+  `G1X10E2` now means X=10 and E=2, not X=1000 with no extrusion. This also fixes
+  extrusion rewriting in space-stripped toolpaths, including decoded binary G-code.
+  Compact `G92E...` resets and explicitly signed positive values are recognized too.
+  Regression tests compare every welded move from compact and spaced input files.
+
 ## 1.6.0
 
 - Preserve the source feed rate after generated seam travel/retraction moves

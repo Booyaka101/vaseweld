@@ -98,6 +98,10 @@ def test_directory_instead_of_file(tmp_path):
         ("G0 Z1.5", ("G0", None, None, 1.5, None)),
         ("G2 X1 Y2 I3 J4 E0.1", ("G2", 1.0, 2.0, None, 0.1)),
         ("G1 E-2 F2400 ; retract", ("G1", None, None, None, -2.0)),
+        ("G1X10E2", ("G1", 10.0, None, None, 2.0)),
+        ("G1X10E-2", ("G1", 10.0, None, None, -2.0)),
+        ("g1x10e2", ("G1", 10.0, None, None, 2.0)),
+        ("G1X+10Y-.5E+.25", ("G1", 10.0, -0.5, None, 0.25)),
     ],
 )
 def test_parse_move(line, expected):
@@ -112,6 +116,10 @@ def test_parse_move_ignores_non_moves(line):
 
 def test_parse_g92_and_mode():
     assert parse_g92_e("G92 E0") == 0.0
+    assert parse_g92_e("G92E12.5") == 12.5
+    assert parse_g92_e("g92x0e-2") == -2.0
+    assert parse_g92_e("G920 E1") is None
+    assert parse_g92_e("G92.1 E1") is None
     assert parse_g92_e("G92 X0 Y0") is None
     assert parse_e_mode("M83 ; relative") is True
     assert parse_e_mode("M82") is False
@@ -121,6 +129,8 @@ def test_parse_g92_and_mode():
 def test_set_e_leaves_the_rest_of_the_line_alone():
     assert set_e("G1 X1.5 Y2 E12.5 F1800 ; wall", 0.25) == "G1 X1.5 Y2 E0.25 F1800 ; wall"
     assert set_e("G2 X1 Y2 I3 J4 E1.0", -2.0) == "G2 X1 Y2 I3 J4 E-2"
+    assert set_e("G1X10E2F1800; wall", 0.25) == "G1X10E0.25F1800; wall"
+    assert set_e("g1x10e-2; retract", -0.5) == "g1x10e-0.5; retract"
 
 
 def test_format_e_matches_slicer_style():

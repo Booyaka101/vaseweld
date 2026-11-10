@@ -388,7 +388,8 @@ _LAYER_CHANGE = re.compile(r"^\s*;\s*(LAYER_CHANGE|CHANGE_LAYER)\s*$", re.IGNORE
 _Z_MARKER = re.compile(r"^\s*;\s*(?:Z|Z_HEIGHT)\s*:\s*(-?\d*\.?\d+)\s*$", re.IGNORECASE)
 _CURA_LAYER = re.compile(r"^\s*;\s*LAYER:\s*-?\d+\s*$", re.IGNORECASE)
 _CONFIG_KV = re.compile(r"^\s*;\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*?)\s*$")
-_WORD = re.compile(r"([A-Za-z])\s*(-?\d*\.?\d+(?:[eE][-+]?\d+)?)")
+# E starts the next extrusion word in compact G-code, never a numeric exponent.
+_WORD = re.compile(r"([A-Za-z])\s*([-+]?\d*\.?\d+)")
 _PRINTING_OBJECT = re.compile(
     r";\s*(?:start|stop)?\s*printing object.*?\bid:(\d+)\s+copy\s+(\d+)", re.IGNORECASE
 )
@@ -533,7 +534,7 @@ def parse_move(line: str) -> Move | None:
 def parse_g92_e(line: str) -> float | None:
     """Return the E value of a ``G92`` line, or None if it does not set E."""
     code, _ = strip_comment(line)
-    if not re.match(r"^\s*G92\b", code, re.IGNORECASE):
+    if not re.match(r"^\s*G92(?=\s|[A-Za-z]|$)", code, re.IGNORECASE):
         return None
     for letter, number in _WORD.findall(code):
         if letter.upper() == "E":
