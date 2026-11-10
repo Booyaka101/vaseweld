@@ -144,7 +144,10 @@ def parse_move(line: str) -> Move | None:
     if letter not in "Gg":
         return None
     try:
-        cmd = f"G{int(float(number))}"
+        value = float(number)
+        if not value.is_integer():
+            return None
+        cmd = f"G{int(value)}"
     except ValueError:
         return None
     if cmd not in ("G0", "G1", "G2", "G3"):
@@ -382,7 +385,7 @@ def _find_footer_start(lines: list[str], last_layer_start: int) -> int:
 
 
 def _detect_relative_e(lines: list[str], header_end: int, config: dict[str, str]) -> bool:
-    for line in lines[:header_end]:
+    for line in reversed(lines[:header_end]):
         mode = parse_e_mode(line)
         if mode is not None:
             return mode

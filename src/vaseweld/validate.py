@@ -13,10 +13,10 @@ import statistics
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from .parser import GcodeFile, parse_file, parse_move, strip_comment, walk
+from .parser import Cursor, GcodeFile, parse_file, parse_move, strip_comment, walk
 
-_WAIT_TEMP = re.compile(r"^\s*M(109|190)\b", re.IGNORECASE)
-_TEMP_S = re.compile(r"\b[SR](\d+(?:\.\d+)?)")
+_WAIT_TEMP = re.compile(r"^\s*M(109|190)(?=\s|[A-Za-z]|$)", re.IGNORECASE)
+_TEMP_S = re.compile(r"[SR]\s*([-+]?\d*\.?\d+)", re.IGNORECASE)
 
 # An extrusion of 25x the file's own median mm-of-filament-per-mm-of-travel is
 # not a thick line, it is an absolute E value that leaked into a relative file.
@@ -69,6 +69,15 @@ def _body(gcode: GcodeFile) -> list[str]:
     return gcode.lines[gcode.header_end : gcode.footer_start]
 
 
+def _body_cursor(gcode: GcodeFile) -> Cursor:
+    cursor = gcode.cursor()
+    for _ in walk(gcode.header, cursor):
+        # Startup purges are not unmatched unretracts, but a final startup
+        # retraction still needs to be carried into the print body.
+        cursor.retracted = max(0.0, cursor.retracted)
+    return cursor
+
+
 def _check_z(gcode: GcodeFile, report: Report) -> None:
     """Extruding moves may never drop below a height already printed."""
     highest = None
@@ -100,7 +109,7 @@ def _check_z(gcode: GcodeFile, report: Report) -> None:
 
 def _check_extrusion(gcode: GcodeFile, report: Report) -> None:
     """Decode the body's extrusion and record mode switches, blowouts and retractions."""
-    cursor = gcode.cursor()
+    cursor = _body_cursor(gcode)
     ratios: list[tuple[int, float, float]] = []
     for step in walk(_body(gcode), cursor):
         number = gcode.header_end + step.index + 1
@@ -174,7 +183,7 @@ def _check_retractions(gcode: GcodeFile, report: Report) -> None:
     E-only move, BambuStudio splits it between a wiping move and an E-only tail.
     Tracking how much filament is pulled back at any moment works for both.
     """
-    cursor = gcode.cursor()
+    cursor = _body_cursor(gcode)
     peak = trough = 0.0
     peak_at = trough_at = gcode.header_end
     largest = 0.0

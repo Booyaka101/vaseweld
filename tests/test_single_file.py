@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import subprocess
 import sys
 from pathlib import Path
@@ -50,3 +51,13 @@ def test_standalone_file_produces_identical_output(tmp_path):
 
     assert standalone.read_bytes() == package.read_bytes()
     assert first.stdout.replace(str(standalone), "") == second.stdout.replace(str(package), "")
+
+
+def test_standalone_json_report_matches_the_package():
+    args = ["check", str(fixture("prusaslicer_normal_6mm.gcode")), "--json"]
+    standalone = subprocess.run([sys.executable, str(ROOT / "vaseweld.py"), *args],
+                                capture_output=True, text=True, check=False)
+    package = subprocess.run([sys.executable, "-m", "vaseweld.cli", *args],
+                             capture_output=True, text=True, cwd=ROOT / "src", check=False)
+    assert standalone.returncode == package.returncode == 0
+    assert json.loads(standalone.stdout) == json.loads(package.stdout)

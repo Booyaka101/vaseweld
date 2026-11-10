@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import argparse
+import json
 import math
 import os
 import sys
 import tempfile
+from dataclasses import asdict
 from pathlib import Path
 from typing import Callable
 
@@ -238,6 +240,7 @@ def _build_parser() -> argparse.ArgumentParser:
         description="Verify Z, extrusion, retractions and the temperature timeline.",
     )
     check_cmd.add_argument("file", type=Path, help="G-code file to check")
+    check_cmd.add_argument("--json", action="store_true", help="print a machine-readable report")
     return parser
 
 
@@ -583,9 +586,13 @@ def _run_layers(args: argparse.Namespace, out: "object") -> int:
 
 def _run_check(args: argparse.Namespace, out: "object") -> int:
     report = run_check(args.file)
-    print(report.summary(), file=out)
-    for problem in report.problems:
-        print(problem, file=out)
+    if args.json:
+        data = {**asdict(report), "path": str(report.path), "ok": report.ok}
+        print(json.dumps(data), file=out)
+    else:
+        print(report.summary(), file=out)
+        for problem in report.problems:
+            print(problem, file=out)
     return EXIT_OK if report.ok else EXIT_PROBLEMS
 
 
