@@ -1,5 +1,23 @@
 # Changelog
 
+## 1.7.0
+
+- Add `check FILE --json` for machine-readable validation results, preserving
+  the existing exit codes and human-readable default.
+- Initialize extrusion and retraction validation from the header's actual state,
+  excluding startup purges from retraction imbalance. Honor the last header
+  extrusion mode and detect compact, lowercase and explicitly signed temperature waits.
+- Match an inherited seam retraction before the incoming layer primes, including
+  with `--no-seam-retract`; this option still preserves the source retraction state.
+- Reject out-of-range or nonfinite profile and library flow ratios, unknown library
+  `first_role` values, and incomplete MeatPack streams. Reset MeatPack's no-spaces
+  mode on its reset command. Do not interpret decimal G-code subcommands as moves.
+- Parse compact G-code without treating the extrusion word as a numeric exponent.
+  `G1X10E2` now means X=10 and E=2, not X=1000 with no extrusion. This also fixes
+  extrusion rewriting in space-stripped toolpaths, including decoded binary G-code.
+  Compact `G92E...` resets and explicitly signed positive values are recognized too.
+  Regression tests compare every welded move from compact and spaced input files.
+
 ## 1.6.0
 
 - Preserve the source feed rate after generated seam travel/retraction moves

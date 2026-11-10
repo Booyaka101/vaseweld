@@ -338,6 +338,10 @@ def _seam_lines(
         " ; vaseweld: seam travel to where the next slice expects the nozzle"
     )
     prime = seam.retracted + top_up - resume.retracted
+    if prime < -1e-4:
+        # Match an inherited retraction before the incoming layer primes itself,
+        # rather than briefly double-priming and retracting again at the travel.
+        return _Seam([move_e(prime, "retract")], lines)
     if prime > 1e-4:
         lines.append(move_e(prime, "unretract"))
     return _Seam([], lines)
@@ -679,7 +683,7 @@ def _plan(
 
     vase = next((region.source for region in regions if region.role == "vase"), None)
     vase_config = vase.config if vase else {}
-    return _Plan(
+    plan = _Plan(
         regions=regions,
         cuts=cuts,
         start_flow=start_flow
@@ -690,6 +694,13 @@ def _plan(
         else flow_ratio(vase_config, "spiral_finishing_flow_ratio", DEFAULT_FINISHING_FLOW_RATIO),
         warnings=warnings,
     )
+    for key, value in (
+        ("spiral_starting_flow_ratio", plan.start_flow),
+        ("spiral_finishing_flow_ratio", plan.finish_flow),
+    ):
+        if not 0.0 <= value <= 1.0:
+            raise WeldError(f"{key} must be between 0 and 1, got {value}")
+    return plan
 
 
 def _seam_step_warning(top: GcodeFile, cut_layer: Layer, bottom_last: Layer) -> list[str]:
@@ -843,6 +854,8 @@ def weld(
     alternating, so two cuts make a solid base, a vase body and a solid lid.
     """
     sources = {"normal": normal, "vase": vase}
+    if first_role not in sources:
+        raise WeldError(f"first_role must be 'normal' or 'vase', got {first_role!r}")
     cut_zs = [cut_z] if isinstance(cut_z, (int, float)) else list(cut_z)
     if not cut_zs:
         raise WeldError("no cut height given")

@@ -373,9 +373,21 @@ companion test that the same measurement does catch a hand splice. See [sim/READ
 
 Exit codes are 0 for OK, 1 for problems found, 2 for a file it could not read.
 
+For scripts and CI, `vaseweld check FILE --json` prints one JSON object instead of
+the text report. It includes `ok`, `path`, `relative_e`, `temperature_timelines`,
+`retract_length`, `peak_retracted`, and `problems`. Each problem has a 1-based
+`line`, a `check` identifier, and a `message`. Exit codes are unchanged; unreadable
+files still produce a diagnostic on stderr and no JSON report.
+
 The Z check follows the current height even when a travel line changes Z and a
 later extrusion line omits it. Retractions, Z hops and stationary priming do not
 raise the highest deposited height.
+
+Extrusion and retraction checks also carry the header's position, extrusion mode,
+and final retraction into the print body. Compact commands such as `G1X10E2`,
+`G92E0`, and `M109S215` are recognized without needing spaces. Flow ratios from
+the vase profile or library API must be finite values between 0 and 1, just like
+the CLI overrides.
 
 Binary G-code is checked against its stored CRC32 checksums when present, and
 invalid block sizes or encodings are refused before welding. A checksum detects

@@ -176,8 +176,12 @@ def meatpack(data: bytes, respace: bool) -> str:
         if command:
             if byte == _ENABLE_PACKING:
                 packing = True
-            elif byte in (_DISABLE_PACKING, _RESET_ALL):
+            elif byte == _DISABLE_PACKING:
                 packing = False
+            elif byte == _RESET_ALL:
+                packing = no_spaces = False
+                pending = 0
+                held = None
             elif byte == _ENABLE_NO_SPACES:
                 no_spaces = True
             elif byte == _DISABLE_NO_SPACES:
@@ -189,6 +193,8 @@ def meatpack(data: bytes, respace: bool) -> str:
             signals = 0
         receive(byte)
 
+    if pending or held is not None or signals or command:
+        raise BgcodeError("truncated MeatPack stream")
     return _respace(chars) if respace else "".join(chars)
 
 
